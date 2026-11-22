@@ -80,6 +80,10 @@ npm run deploy
 
 L'adresse est du type `https://eau.<votre-sous-domaine>.workers.dev` ; celle de l'ASL se règle dans `wrangler.jsonc` (`ASL_URL`). Sans ces deux secrets, le Worker refuse tout (503) : rien n'est jamais ouvert par oubli.
 
+### Régénérer la clé de Live Objects (bureau)
+
+**Réglages → Clé de réception Live Objects → Régénérer la clé…** (réservé au bureau). La nouvelle clé s'affiche **une seule fois** (bouton « Copier ») ; le site n'en conserve que l'empreinte SHA-256. L'ancienne clé (la clé d'origine, ou la précédente) reste valable **24 heures** pour laisser le temps de remplacer la valeur de l'en-tête `Device-Token` dans l'action HTTPS push de Live Objects. L'écran indique pour chaque clé sa date, son auteur et sa dernière utilisation : on voit ainsi quand Live Objects a basculé. La clé d'origine (secret `INGEST_KEY`) fonctionne tant qu'aucune clé n'a été régénérée, puis expire 24 h après la première régénération.
+
 ### Côté Live Objects
 
 Dans la politique d'action HTTPS push que vous aviez pour TagoIO, ou dans une nouvelle :
@@ -124,6 +128,7 @@ curl -X POST localhost:8787/ingest -H 'Device-Token: cle' \
 |---|---|
 | `src/worker.js` | réception `/ingest`, API (lecture pour tous, écriture pour le bureau), session, service des fichiers de `public/` |
 | `src/auth.js` | jetons signés de la connexion unique et session |
+| `migrations/0004_api_keys.sql` | empreintes des clés de réception générées par le bureau |
 | `src/ingest.js` | extraction des mesures d'un message (Adeunis `genericSensor`, TagoIO, Live Objects) |
 | `migrations/` | schéma de la base D1 |
 | `public/lib.js` | calculs purs : intervalles, répartition par période, alertes, profil horaire |

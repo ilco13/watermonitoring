@@ -11,10 +11,11 @@
  *   PUT  /api/config                                            réglages communs        (bureau)
  *   GET  /api/variables, /api/events                            diagnostic              (bureau)
  *   GET/POST/DELETE /api/readings                               liste, ajout, correction, suppression d'un relevé (bureau)
+ *   GET/POST /api/ingest-key                                    état / régénération de la clé Live Objects (bureau)
  *   tout le reste       fichiers de public/ (intégrés au Worker)
  *
  * Non connecté : les pages renvoient vers l'ASL (qui renvoie ici une fois connecté), les appels d'API reçoivent 401.
- * Secrets (npx wrangler secret put ...) : SSO_SECRET (partagé avec l'ASL), INGEST_KEY. Variable : ASL_URL.
+ * Secrets (npx wrangler secret put ...) : SSO_SECRET (partagé avec l'ASL), INGEST_KEY (clé d'origine ; le bureau peut en générer d'autres). Variable : ASL_URL.
  * Sans l'un de ces secrets, la partie concernée répond 503 : jamais ouverte par oubli.
  */
 import { parseIngest } from './ingest.js';
@@ -37,7 +38,16 @@ async function safeEqual(a, b) {
   return crypto.subtle.timingSafeEqual(x, y);
 }
 
-async function ingestAuthorized(request, url, env) {
+const hex = (bytes) => [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, '0')).join('');
+const sha256hex = async (text) => hex(await digest(text));
+const GRACE_MS = 24 * 3600e3;   // une clé remplacée reste valable 24 h, le temps de mettre à jour Live Objects
+
+/**
+ * Clés acceptées : la clé d'origine (secret INGEST_KEY, valable jusqu'à 24 h après la première régénération) et les clés
+ * générées depuis le tableau de bord (empreinte en base, en vigueur ou remplacée depuis moins de 24 h).
+ * @returns {{type:'legacy'}|{type:'db', id:number}|null}
+ */
+async function matchIngestKey(request, url, env) {
   const auth = request.headers.get('Authorization') || '';
   const candidates = [
     request.headers.get('Device-Token'),
@@ -45,13 +55,29 @@ async function ingestAuthorized(request, url, env) {
     auth.startsWith('Bearer ') ? auth.slice(7) : auth || null, // « Bearer clé » ou simplement « clé » (comme TagoIO)
     url.searchParams.get('key'),
   ].filter(Boolean);
-  for (const c of candidates) if (await safeEqual(c, env.INGEST_KEY)) return true;
-  return false;
+  if (!candidates.length) return null;
+  const now = Date.now();
+  const row = await env.DB.prepare("SELECT value FROM config WHERE key = 'ingest_legacy_until'").first();
+  const legacyOpen = Boolean(env.INGEST_KEY) && (!row || now < Number(row.value));
+  for (const c of candidates) {
+    if (legacyOpen && (await safeEqual(c, env.INGEST_KEY))) return { type: 'legacy' };
+    const k = await env.DB.prepare('SELECT id FROM api_keys WHERE key_hash = ? AND (expires_at IS NULL OR expires_at > ?)').bind(await sha256hex(c), now).first();
+    if (k) return { type: 'db', id: k.id };
+  }
+  return null;
 }
 
 async function handleIngest(request, url, env) {
-  if (!env.INGEST_KEY) return json({ ok: false, message: 'Secret INGEST_KEY non défini' }, 503);
-  if (!(await ingestAuthorized(request, url, env))) return json({ ok: false, message: 'Clé refusée' }, 401);
+  if (!env.INGEST_KEY && !(await env.DB.prepare('SELECT 1 AS x FROM api_keys LIMIT 1').first())) {
+    return json({ ok: false, message: 'Aucune clé de réception définie' }, 503);
+  }
+  const matched = await matchIngestKey(request, url, env);
+  if (!matched) return json({ ok: false, message: 'Clé refusée' }, 401);
+  // dernière utilisation de la clé : permet de voir si Live Objects a bien basculé sur la nouvelle
+  await (matched.type === 'db'
+    ? env.DB.prepare('UPDATE api_keys SET last_used_at = ? WHERE id = ?').bind(Date.now(), matched.id)
+    : env.DB.prepare("INSERT INTO config (key, value, updated_at, updated_by) VALUES ('ingest_legacy_last_used', ?, ?, NULL) ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at").bind(String(Date.now()), Date.now())
+  ).run();
   if (request.method !== 'POST') return json({ ok: false, message: 'POST attendu' }, 405);
 
   const text = await request.text();
@@ -164,6 +190,37 @@ function sanitizeConfig(c) {
   return { historyYears: NUM(c.historyYears, 1, 10, 3), refreshMin: NUM(c.refreshMin, 1, 1440, 10), meters };
 }
 
+/** Nouvelle clé (192 bits) : renvoyée une seule fois, seule son empreinte est conservée. La précédente reste valable 24 h. */
+async function regenerateIngestKey(env, session) {
+  const now = Date.now(), by = String(session.email || session.name || session.sub).slice(0, 120);
+  const key = hex(crypto.getRandomValues(new Uint8Array(24)));
+  await env.DB.batch([
+    // la clé d'origine (secret Cloudflare) cesse de fonctionner 24 h après la première régénération (jamais prolongée ensuite)
+    env.DB.prepare("INSERT OR IGNORE INTO config (key, value, updated_at, updated_by) VALUES ('ingest_legacy_until', ?, ?, ?)").bind(String(now + GRACE_MS), now, by),
+    env.DB.prepare('UPDATE api_keys SET expires_at = ? WHERE expires_at IS NULL').bind(now + GRACE_MS),
+    env.DB.prepare('INSERT INTO api_keys (key_hash, created_at, created_by) VALUES (?, ?, ?)').bind(await sha256hex(key), now, by),
+  ]);
+  return key;
+}
+
+/** État des clés, sans aucun secret : dates, auteur, dernière utilisation. */
+async function ingestKeyStatus(env) {
+  const now = Date.now();
+  const iso = (ms) => (ms ? new Date(ms).toISOString() : null);
+  const legacy = await env.DB.prepare("SELECT key, value FROM config WHERE key IN ('ingest_legacy_until', 'ingest_legacy_last_used')").all();
+  const cfg = Object.fromEntries(legacy.results.map((r) => [r.key, Number(r.value)]));
+  const { results } = await env.DB.prepare('SELECT id, created_at, created_by, expires_at, last_used_at FROM api_keys ORDER BY id DESC LIMIT 5').all();
+  return {
+    legacy: {
+      present: Boolean(env.INGEST_KEY),
+      validUntil: iso(cfg.ingest_legacy_until),
+      active: Boolean(env.INGEST_KEY) && (!cfg.ingest_legacy_until || now < cfg.ingest_legacy_until),
+      lastUsedAt: iso(cfg.ingest_legacy_last_used),
+    },
+    keys: results.map((k) => ({ id: k.id, createdAt: iso(k.created_at), createdBy: k.created_by, validUntil: iso(k.expires_at), active: !k.expires_at || k.expires_at > now, lastUsedAt: iso(k.last_used_at) })),
+  };
+}
+
 const FORBIDDEN = () => json({ status: false, message: 'Réservé au bureau' }, 403);
 
 async function handleApi(request, url, env, session) {
@@ -183,6 +240,15 @@ async function handleApi(request, url, env, session) {
       ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at, updated_by = excluded.updated_by`)
       .bind(CONFIG_KEY, JSON.stringify(cfg), Date.now(), String(session.email || session.name || session.sub).slice(0, 120)).run();
     return json({ status: true });
+  }
+
+  if (p === '/api/ingest-key') {
+    if (!admin) return FORBIDDEN();
+    if (request.method === 'POST') {
+      if (!writeAllowed(request, url)) return json({ status: false, message: 'Requête refusée' }, 403);
+      return json({ status: true, result: { key: await regenerateIngestKey(env, session) } });
+    }
+    if (request.method === 'GET') return json({ status: true, result: await ingestKeyStatus(env) });
   }
 
   if (request.method !== 'GET') return json({ status: false, message: 'Méthode non autorisée' }, 405);

@@ -398,6 +398,7 @@
         <div><button class="btn" type="button" id="btn-detect">Variables et derniers messages reçus</button></div>
         <div id="detect-out" hidden></div><datalist id="vars"></datalist>
       </fieldset>
+      ${mode === 'server' ? '<fieldset><legend>Clé de réception Live Objects</legend><div id="key-box" class="small">Chargement…</div></fieldset>' : ''}
       ${meterFs}
       <div class="dlg-actions">
         <button class="btn" type="button" id="btn-reset">Valeurs par défaut</button>
@@ -437,10 +438,58 @@
     } catch (e) { out.textContent = 'Échec : ' + e.message; }
   }
 
+  /* ---------- Clé de réception Live Objects (régénération par le bureau) ---------- */
+
+  async function loadKeyBox() {
+    const box = $('#key-box'); if (!box) return;
+    try {
+      const st = await apiGet('ingest-key', {});
+      const d = (iso) => (iso ? fmtFull(Date.parse(iso)) : null);
+      const used = (iso) => (iso ? `dernière utilisation ${d(iso)}` : 'jamais utilisée');
+      const lines = [];
+      const current = st.keys.find((k) => k.active && !k.validUntil);
+      const old = st.keys.filter((k) => k.active && k.validUntil);
+      if (current) lines.push(`<li><strong>Clé actuelle</strong> : générée le ${esc(d(current.createdAt))} par ${esc(current.createdBy || '?')} · ${esc(used(current.lastUsedAt))}</li>`);
+      if (st.legacy.present) {
+        lines.push(st.legacy.active
+          ? `<li><strong>Clé d'origine</strong> (installation)${st.legacy.validUntil ? ` : <strong>valable jusqu'au ${esc(d(st.legacy.validUntil))}</strong>` : ' : en vigueur'} · ${esc(used(st.legacy.lastUsedAt))}</li>`
+          : `<li class="muted">Clé d'origine (installation) : expirée.</li>`);
+      }
+      for (const k of old) lines.push(`<li><strong>Ancienne clé</strong> : valable jusqu'au ${esc(d(k.validUntil))} · ${esc(used(k.lastUsedAt))}</li>`);
+      const live = (current && current.lastUsedAt) ? 'Live Objects utilise déjà la nouvelle clé.' : current ? 'Live Objects n\'a pas encore utilisé la nouvelle clé : mettez-le à jour avant l\'expiration de l\'ancienne.' : '';
+      box.innerHTML = `<ul class="plain">${lines.join('') || '<li class="muted">Aucune clé.</li>'}</ul>${live ? `<p>${esc(live)}</p>` : ''}
+        <p class="hint">Live Objects envoie cette clé dans l'en-tête <code>Device-Token</code> vers <code>${esc(location.origin)}/ingest</code>.</p>
+        <div><button class="btn" type="button" id="btn-regen-key">Régénérer la clé…</button></div><div id="key-new"></div>`;
+      $('#btn-regen-key').onclick = regenerateKey;
+    } catch (e) { box.textContent = 'Lecture impossible : ' + e.message; }
+  }
+
+  function showNewKey(key) {
+    $('#key-new').innerHTML = `<div class="flash-key"><p><strong>Nouvelle clé</strong> — copiez-la maintenant, elle ne sera plus jamais affichée :</p>
+      <div class="key-row"><input id="key-value" type="text" readonly value="${esc(key)}" aria-label="Nouvelle clé de réception"><button class="btn" type="button" id="btn-copy-key">Copier</button></div>
+      <p class="hint">Dans Live Objects, remplacez la valeur de l'en-tête <code>Device-Token</code> de l'action HTTPS push par cette clé. L'ancienne clé fonctionne encore 24 h.</p></div>`;
+    const input = $('#key-value'); input.focus(); input.select();
+    $('#btn-copy-key').onclick = async () => {
+      try { await navigator.clipboard.writeText(key); $('#btn-copy-key').textContent = 'Copiée ✓'; }
+      catch (e) { input.select(); $('#btn-copy-key').textContent = 'Sélectionnée : Ctrl+C'; }
+    };
+  }
+
+  async function regenerateKey() {
+    if (!window.confirm('Générer une nouvelle clé de réception ?\n\nLa clé actuelle reste valable 24 h pour vous laisser le temps de mettre à jour l\'action HTTPS push de Live Objects. La nouvelle clé ne sera affichée qu\'une seule fois.')) return;
+    $('#btn-regen-key').disabled = true;
+    try {
+      const key = (await apiSend('POST', 'ingest-key', {})).result.key;
+      await loadKeyBox();      // met à jour l'état des clés
+      showNewKey(key);         // puis affiche la clé, une seule fois
+    } catch (e) { window.alert('Régénération impossible : ' + e.message); const b = $('#btn-regen-key'); if (b) b.disabled = false; }
+  }
+
   function openSettings() {
     const dlg = $('#settings');
     dlg.innerHTML = settingsHtml();
     $('#btn-detect').onclick = detectVariables;
+    if (mode === 'server') loadKeyBox();
     $('#btn-cancel').onclick = () => dlg.close();
     const persist = async () => { try { await saveCfg(); } catch (e) { window.alert('Enregistrement impossible : ' + e.message); } start(); };
     $('#btn-reset').onclick = () => { cfg = JSON.parse(JSON.stringify(DEFAULT_CFG)); dlg.close(); persist(); };
