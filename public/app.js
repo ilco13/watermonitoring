@@ -120,8 +120,18 @@
 
   function renderStatus() {
     const lastT = Math.max(0, ...cfg.meters.map((m) => (state.data[m.id] || { readings: [] }).readings.slice(-1).map((r) => r.t)[0] || 0));
+    const nexts = cfg.meters.map((m) => (state.data[m.id] ? WM.nextExpected(state.data[m.id].readings) : null)).filter(Boolean);
+    const next = nexts.length ? nexts.reduce((a, b) => (b.anchor > a.anchor ? b : a)) : null;
+    const hm = (t) => new Date(t).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+    let nextTxt = '';
+    if (next) {
+      const wait = next.at - Date.now();
+      nextTxt = wait > 0 ? ` · prochain relevé vers ${hm(next.at)} (dans ${WM.fmtDuration(wait)})`
+        : wait > -10 * 60e3 ? ' · prochain relevé imminent'
+          : ` · prochain relevé attendu à ${hm(next.at)} (en retard de ${WM.fmtDuration(-wait)})`;
+    }
     $('#status').textContent = lastT
-      ? `Dernier relevé : ${fmtDateTime(lastT)} (il y a ${WM.fmtDuration(Date.now() - lastT)}) · actualisé à ${new Date(state.loadedAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`
+      ? `Dernier relevé : ${fmtDateTime(lastT)} (il y a ${WM.fmtDuration(Date.now() - lastT)})${nextTxt} · actualisé à ${hm(state.loadedAt)}`
       : 'Aucun relevé.';
   }
 
@@ -617,6 +627,7 @@
     });
     $('#as-table').onchange = (e) => { state.asTable = e.target.checked; renderChart(); };
     setupTip();
+    setInterval(() => { if (state.loadedAt) renderStatus(); }, 30000);
     start();
   }
 

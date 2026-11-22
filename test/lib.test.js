@@ -240,3 +240,21 @@ test('plage sans consommation : arrosage de nuit, une consommation en journée e
 
     assert.ok(!WM.evaluateAlerts(cfg, edge, WM.toIntervals(edge), n2).some((a) => a.code === 'quiet'), 'tranche à cheval sur 18 h : ignorée'); }
 });
+
+test('prochain relevé attendu : dernier relevé automatique + période habituelle', () => {
+  const t0 = at(2026, 6, 15, 8, 0);
+  const auto = Array.from({ length: 10 }, (_, i) => ({ t: t0 + i * 2 * H + (i % 3) * 20000, v: i * 20, src: 'auto' }));
+  const n = WM.nextExpected(auto);
+  assert.ok(Math.abs(n.period - 2 * H) < 60e3);
+  assert.equal(n.anchor, auto[9].t);
+  assert.ok(Math.abs(n.at - (auto[9].t + 2 * H)) < 60e3);
+  // un relevé manuel plus récent ne décale pas l'horaire des relevés automatiques
+  const withManual = auto.concat([{ t: auto[9].t + 30 * 60e3, v: 999, src: 'manual' }]);
+  assert.equal(WM.nextExpected(withManual).anchor, auto[9].t);
+  // doublons rapprochés (secondes) ignorés dans le calcul de la période
+  const dup = []; for (const r of auto) { dup.push(r); dup.push({ t: r.t + 3000, v: r.v, src: 'auto' }); }
+  assert.ok(Math.abs(WM.nextExpected(dup).period - 2 * H) < 60e3);
+  // pas assez d'historique : rien
+  assert.equal(WM.nextExpected(auto.slice(0, 3)), null);
+  assert.equal(WM.nextExpected([]), null);
+});

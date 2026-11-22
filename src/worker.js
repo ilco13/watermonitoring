@@ -163,9 +163,9 @@ async function handleApi(request, url, env) {
     const start = Date.parse(url.searchParams.get('start_date') || '') || 0;
     const order = url.searchParams.get('ordination') === 'ascending' ? 'ASC' : 'DESC';
     const { results } = await env.DB
-      .prepare(`SELECT ts, value FROM readings WHERE variable = ? AND ts >= ? ORDER BY ts ${order} LIMIT ? OFFSET ?`)
+      .prepare(`SELECT ts, value, source FROM readings WHERE variable = ? AND ts >= ? ORDER BY ts ${order} LIMIT ? OFFSET ?`)
       .bind(variable, start, qty, skip).all();
-    return json({ status: true, result: results.map((r) => ({ variable, value: r.value, time: new Date(r.ts).toISOString() })) });
+    return json({ status: true, result: results.map((r) => ({ variable, value: r.value, time: new Date(r.ts).toISOString(), source: r.source })) });
   }
 
   if (p === '/api/variables') {

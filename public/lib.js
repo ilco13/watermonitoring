@@ -32,7 +32,7 @@
     for (const r of rows) {
       const v = r.value === null || r.value === '' || r.value === undefined ? NaN : Number(r.value);
       const t = typeof r.time === 'number' ? r.time : Date.parse(r.time);
-      if (Number.isFinite(v) && Number.isFinite(t)) out.push({ t, v: v * k });
+      if (Number.isFinite(v) && Number.isFinite(t)) out.push({ t, v: v * k, src: r.source || null });
     }
     out.sort((a, b) => a.t - b.t);
     // supprime les doublons de timestamp (rejeu http push)
@@ -198,6 +198,23 @@
     };
   }
 
+  /**
+   * Prochain relevé automatique attendu : dernier relevé automatique + période habituelle (médiane des
+   * derniers écarts entre relevés, hors relevés manuels et doublons rapprochés). null si pas assez d'historique.
+   */
+  function nextExpected(readings) {
+    const auto = readings.filter((r) => r.src !== 'manual');
+    if (auto.length < 4) return null;
+    const gaps = [];
+    for (let i = auto.length - 1; i > 0 && gaps.length < 12; i--) {
+      const g = auto[i].t - auto[i - 1].t;
+      if (g >= 30 * 60e3 && g <= 6 * H) gaps.push(g);
+    }
+    if (gaps.length < 3) return null;
+    const period = median(gaps), anchor = auto[auto.length - 1].t;
+    return { at: anchor + period, period, anchor };
+  }
+
   /* ---------- Alertes ---------- */
 
   const LEVEL_RANK = { critical: 3, serious: 2, warning: 1 };
@@ -339,7 +356,7 @@
   return {
     H, DAY, toReadings, toIntervals, bucketize, estimatedShare, total,
     startOfDay, addDays, startOfMonth, addMonths, startOfYear, addYears, startOfWeek,
-    edgesBack, edgesHours, edgesCalendar, edgesRolling, summarize, evaluateAlerts, weeklyProfile, median,
+    edgesBack, edgesHours, edgesCalendar, edgesRolling, nextExpected, summarize, evaluateAlerts, weeklyProfile, median,
     fmtVolume, fmtDuration, fmtTime, pct,
   };
 });
