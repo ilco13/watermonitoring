@@ -227,37 +227,48 @@ async function handleApi(request, url, env, session) {
   return json({ status: false, message: 'Route inconnue' }, 404);
 }
 
-function serveAsset(request, url) {
+function serveAsset(request, url, env) {
   if (request.method !== 'GET' && request.method !== 'HEAD') return new Response('Méthode non autorisée', { status: 405 });
   const path = url.pathname === '/' ? '/index.html' : url.pathname;
   const a = Object.prototype.hasOwnProperty.call(ASSETS, path) ? ASSETS[path] : null;
   if (!a) return new Response('Introuvable', { status: 404, headers: { 'content-type': 'text/plain; charset=utf-8' } });
-  const headers = { 'content-type': a.type, etag: a.etag, 'cache-control': 'private, no-cache', ...SECURITY_HEADERS };
-  if (request.headers.get('If-None-Match') === a.etag) return new Response(null, { status: 304, headers });
-  return new Response(request.method === 'HEAD' ? null : a.body, { headers });
+  const headers = { 'content-type': a.type, 'cache-control': 'private, no-cache', ...securityHeaders(env) };
+  let body = a.body;
+  if (path === '/index.html') {
+    // nom et adresse de l'ASL (logo, lien de retour) : propres à l'installation, donc pas mis en cache
+    body = body.replaceAll('{{ASL_URL}}', escHtml((env.ASL_URL || '').replace(/\/$/, ''))).replaceAll('{{ASL_NAME}}', escHtml(env.ASL_NAME || 'ASL'));
+    headers['cache-control'] = 'no-store';
+  } else {
+    headers.etag = a.etag;
+    if (request.headers.get('If-None-Match') === a.etag) return new Response(null, { status: 304, headers });
+  }
+  return new Response(request.method === 'HEAD' ? null : body, { headers });
 }
 
 /** En-têtes de sécurité du site (pages et fichiers) : le site gère des sessions, il ne doit être ni intégré ailleurs ni charger de code étranger. */
-const SECURITY_HEADERS = {
-  'Content-Security-Policy': "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+const securityHeaders = (env) => ({
+  // le logo de l'ASL est chargé depuis le site de l'ASL : son adresse est la seule origine étrangère autorisée (images)
+  'Content-Security-Policy': `default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: ${aslOrigin(env)}; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`,
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'same-origin',
   'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
   'X-Frame-Options': 'DENY',
-};
+});
+const aslOrigin = (env) => { try { return new URL(env.ASL_URL).origin; } catch { return ''; } };
+const escHtml = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-const html = (body, status = 200) => new Response(`<!doctype html><html lang="fr"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Consommation d'eau</title><link rel="stylesheet" href="/style.css"><body><main class="wrap">${body}</main></body></html>`,
-  { status, headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', ...SECURITY_HEADERS } });
+const html = (body, status = 200, env = {}) => new Response(`<!doctype html><html lang="fr"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Consommation d'eau</title><link rel="stylesheet" href="/style.css"><body><main>${body}</main></body></html>`,
+  { status, headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', ...securityHeaders(env) } });
 
 /** Retour de l'ASL : échange le jeton signé (60 s, usage unique) contre une session de 12 h. */
 async function handleSsoCallback(request, url, env) {
   const retry = `<p><a href="/">Se reconnecter</a></p>`;
   const p = await verify(url.searchParams.get('token'), env.SSO_SECRET, 'eau');
   if (!p || typeof p.nonce !== 'string' || p.nonce.length < 16 || p.nonce.length > 100) {
-    return html(`<h1>Connexion impossible</h1><p>Le lien de connexion est invalide ou expiré.</p>${retry}`, 400);
+    return html(`<h1>Connexion impossible</h1><p>Le lien de connexion est invalide ou expiré.</p>${retry}`, 400, env);
   }
   const ins = await env.DB.prepare('INSERT OR IGNORE INTO sso_nonces (nonce, exp) VALUES (?, ?)').bind(p.nonce, p.exp).run();
-  if (!ins.meta.changes) return html(`<h1>Connexion impossible</h1><p>Ce lien de connexion a déjà été utilisé.</p>${retry}`, 400);
+  if (!ins.meta.changes) return html(`<h1>Connexion impossible</h1><p>Ce lien de connexion a déjà été utilisé.</p>${retry}`, 400, env);
   await env.DB.prepare('DELETE FROM sso_nonces WHERE exp < ?').bind(Date.now()).run();
   const clip = (v) => (typeof v === 'string' ? v.slice(0, 120) : '');
   const token = await makeSession({ sub: String(p.sub ?? '').slice(0, 40), email: clip(p.email), name: clip(p.name), role: p.role }, env.SSO_SECRET);
@@ -289,6 +300,6 @@ export default {
       return json({ status: false, message: 'Non connecté' }, 401);
     }
     if (url.pathname.startsWith('/api/')) return handleApi(request, url, env, session);
-    return serveAsset(request, url);
+    return serveAsset(request, url, env);
   },
 };

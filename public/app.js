@@ -151,7 +151,8 @@
         : wait > -10 * 60e3 ? ' · prochain relevé imminent'
           : ` · prochain relevé attendu à ${hm(next.at)} (en retard de ${WM.fmtDuration(-wait)})`;
     }
-    const who = state.me ? ` · connecté : ${state.me.name || 'inconnu'} (${state.me.role === 'admin' ? 'bureau' : 'coloti'})` : '';
+    const who = '';
+    const whoEl = $('#who'); if (whoEl) whoEl.textContent = state.me ? `${state.me.name || 'Connecté'} · ${state.me.role === 'admin' ? 'bureau' : 'coloti'}` : '';
     $('#status').textContent = lastT
       ? `Dernier relevé : ${fmtDateTime(lastT)} (il y a ${WM.fmtDuration(Date.now() - lastT)})${nextTxt} · actualisé à ${hm(state.loadedAt)}${who}`
       : 'Aucun relevé.';
@@ -611,9 +612,10 @@
   /* ---------- Thème ---------- */
 
   function applyTheme(t) {
-    if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme;
-    $('#btn-theme').textContent = 'Thème : ' + ({ light: 'clair', dark: 'sombre' }[t] || 'auto');
-    try { localStorage.setItem('wm.theme', t || 'auto'); } catch (e) { /* ignore */ }
+    t = t === 'dark' ? 'dark' : 'light'; // clair par défaut, comme l'ASL ; le sombre est un choix explicite
+    document.documentElement.dataset.theme = t;
+    $('#btn-theme').textContent = 'Thème : ' + (t === 'dark' ? 'sombre' : 'clair');
+    try { localStorage.setItem('wm.theme', t); } catch (e) { /* ignore */ }
   }
 
   /* ---------- Rôles : le bureau modifie, les colotis consultent ---------- */
@@ -648,10 +650,9 @@
   }
 
   function init() {
-    let theme = 'auto'; try { theme = localStorage.getItem('wm.theme') || 'auto'; } catch (e) { /* ignore */ }
+    let theme = 'light'; try { theme = localStorage.getItem('wm.theme') || 'light'; } catch (e) { /* ignore */ }
     applyTheme(theme);
-    $('#btn-theme').onclick = () => { const o = ['auto', 'light', 'dark']; const cur = document.documentElement.dataset.theme || 'auto'; applyTheme(o[(o.indexOf(cur) + 1) % 3]); renderChart(); };
-    matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => renderChart());
+    $('#btn-theme').onclick = () => { applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'); renderChart(); };
     $('#btn-refresh').onclick = async () => { $('#status').textContent = 'Actualisation…'; await loadAll(); renderAll(); };
     $('#btn-settings').onclick = openSettings;
     $('#btn-readings').onclick = openReadings;

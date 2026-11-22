@@ -4,23 +4,28 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex">
-  <title>Consommation d'eau</title>
+  <title>Consommation d'eau · {{ASL_NAME}}</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<div class="wrap">
-  <header class="top">
-    <div>
-      <h1>Consommation d'eau</h1>
-      <p id="status" class="muted" aria-live="polite">Chargement…</p>
-    </div>
-    <div class="actions">
-      <button class="btn" id="btn-refresh" type="button">Actualiser</button>
-      <button class="btn" id="btn-theme" type="button" title="Thème">Thème : auto</button>
-      <button class="btn" id="btn-readings" type="button">Relevés</button>
-      <button class="btn" id="btn-settings" type="button">Réglages</button>
-    </div>
-  </header>
+<header class="top">
+  <a class="brand" href="{{ASL_URL}}/"><img class="brand-logo" src="{{ASL_URL}}/icone.png" alt="" width="36" height="36">{{ASL_NAME}}</a>
+  <nav aria-label="Navigation">
+    <a href="{{ASL_URL}}/">← Retour à l'ASL</a>
+    <a class="active" href="/" aria-current="page">Consommation d'eau</a>
+  </nav>
+  <div class="top-actions">
+    <span class="who" id="who"></span>
+    <button class="btn ghost" id="btn-refresh" type="button">Actualiser</button>
+    <button class="btn ghost" id="btn-readings" type="button">Relevés</button>
+    <button class="btn ghost" id="btn-settings" type="button">Réglages</button>
+    <button class="btn ghost" id="btn-theme" type="button" title="Changer de thème">Thème : clair</button>
+  </div>
+</header>
+
+<main>
+  <h1>Consommation d'eau</h1>
+  <p id="status" class="muted" aria-live="polite">Chargement…</p>
 
   <div id="banner" class="banner" hidden></div>
 
@@ -76,7 +81,7 @@
   </section>
 
   <p class="small muted">Les consommations sont calculées à partir des index relevés toutes les 2 h, avec interpolation aux changements de jour, de mois et d'année (heure locale du navigateur).</p>
-</div>
+</main>
 
 <div id="tip" role="tooltip"></div>
 <dialog id="settings"></dialog>

@@ -45,6 +45,8 @@ Les réglages sont **communs à tous** (enregistrés sur le serveur, modifiables
 
 Fonctionnement : une visite sans session renvoie vers l'ASL (`/sso/eau`), qui renvoie ici avec un jeton signé de 60 secondes (identité et rôle, usage unique) ; le site ouvre alors une session de **12 heures**. Les comptes, les mots de passe et les désactivations restent gérés dans l'ASL : un compte désactivé perd l'accès à l'expiration de sa session ici, au plus tard 12 h après. Le bureau place le lien du site dans l'ASL (Paramètres → « Lien du suivi de la consommation d'eau »).
 
+**Thème** : couleurs, barre d'en-tête, pastilles, cartes et boutons reprennent ceux de l'ASL (clair par défaut ; un bouton « Thème » propose un mode sombre). Le nom et le logo viennent de `ASL_NAME` et `ASL_URL` dans `wrangler.jsonc` ; le logo est chargé depuis le site de l'ASL, qui est la seule origine étrangère autorisée par la politique de sécurité.
+
 La signature utilise un secret `SSO_SECRET` **identique dans l'ASL et ici**. Sans lui, le site refuse tout (503).
 
 ## Mise en route (hébergement gratuit Cloudflare)
