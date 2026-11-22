@@ -20,20 +20,24 @@
     ],
   };
 
-  function loadCfg() {
-    try {
-      const saved = JSON.parse(localStorage.getItem(CFG_KEY) || 'null');
-      if (saved) return Object.assign({}, DEFAULT_CFG, saved, {
-        meters: DEFAULT_CFG.meters.map((m, i) => Object.assign({}, m, (saved.meters || [])[i], { alerts: Object.assign({}, m.alerts, ((saved.meters || [])[i] || {}).alerts) })),
-      });
-    } catch (e) { /* stockage indisponible */ }
-    return JSON.parse(JSON.stringify(DEFAULT_CFG));
+  function mergeCfg(saved) {
+    if (!saved || typeof saved !== 'object') return JSON.parse(JSON.stringify(DEFAULT_CFG));
+    return Object.assign({}, DEFAULT_CFG, saved, {
+      meters: DEFAULT_CFG.meters.map((m, i) => Object.assign({}, m, (saved.meters || [])[i], { alerts: Object.assign({}, m.alerts, ((saved.meters || [])[i] || {}).alerts) })),
+    });
   }
-  function saveCfg() { try { localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); } catch (e) { /* ignore */ } }
+  function loadCfg() {
+    try { return mergeCfg(JSON.parse(localStorage.getItem(CFG_KEY) || 'null')); } catch (e) { return mergeCfg(null); }
+  }
+  // Sur le site, les réglages sont communs à tous et modifiables par le bureau (serveur) ; en démonstration, ils restent locaux.
+  async function saveCfg() {
+    if (mode === 'server') await apiSend('PUT', 'config', { config: cfg });
+    else { try { localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); } catch (e) { /* ignore */ } }
+  }
 
   let cfg = loadCfg();
   let mode = 'demo'; // 'server' (Worker Cloudflare + D1) | 'demo'
-  const state = { data: {}, tab: 'm', mode: 'roll', stacked: false, hidden: new Set(), asTable: false, heatMeter: 0, loadedAt: 0, errors: [], hint: '' };
+  const state = { me: null, data: {}, tab: 'm', mode: 'roll', stacked: false, hidden: new Set(), asTable: false, heatMeter: 0, loadedAt: 0, errors: [], hint: '' };
   let chart = null;
   let timer = null;
 
@@ -43,13 +47,30 @@
     if (new URLSearchParams(location.search).has('demo')) return 'demo';
     try {
       const r = await fetch('api/status', { cache: 'no-store' });
+      if (r.status === 401) { sessionExpired(); return 'server'; } // session expirée : reconnexion via l'ASL
       if (r.ok && (await r.json()).ok) return 'server';
     } catch (e) { /* pas de Worker : page ouverte en local ou hébergée ailleurs */ }
     return 'demo';
   }
 
+  // Session expirée : on recharge la page, le serveur renvoie vers l'ASL qui nous ramène connecté (au plus une fois par minute)
+  function sessionExpired() {
+    try { if (Date.now() - Number(sessionStorage.getItem('wm.relogin') || 0) < 60e3) return false; sessionStorage.setItem('wm.relogin', String(Date.now())); } catch (e) { /* ignore */ }
+    location.reload(); return true;
+  }
+
+  async function apiSend(method, path, body) {
+    const res = await fetch('api/' + path, { method, cache: 'no-store', body: JSON.stringify(body),
+      headers: { 'X-Requested-With': 'eau-dashboard', 'Content-Type': 'application/json' } });
+    let j = null; try { j = await res.json(); } catch (e) { /* corps vide */ }
+    if (res.status === 401 && sessionExpired()) throw new Error('Session expirée, reconnexion…');
+    if (!res.ok || (j && j.status === false)) throw new Error((j && j.message) || `HTTP ${res.status}`);
+    return j;
+  }
+
   async function apiGet(path, params) {
     const res = await fetch('api/' + path + '?' + new URLSearchParams(params), { cache: 'no-store' });
+    if (res.status === 401 && sessionExpired()) throw new Error('Session expirée, reconnexion…');
     let body = null;
     try { body = await res.json(); } catch (e) { /* corps vide */ }
     if (!res.ok || (body && body.status === false)) throw new Error((body && body.message) || `HTTP ${res.status}`);
@@ -130,8 +151,9 @@
         : wait > -10 * 60e3 ? ' · prochain relevé imminent'
           : ` · prochain relevé attendu à ${hm(next.at)} (en retard de ${WM.fmtDuration(-wait)})`;
     }
+    const who = state.me ? ` · connecté : ${state.me.name || 'inconnu'} (${state.me.role === 'admin' ? 'bureau' : 'coloti'})` : '';
     $('#status').textContent = lastT
-      ? `Dernier relevé : ${fmtDateTime(lastT)} (il y a ${WM.fmtDuration(Date.now() - lastT)})${nextTxt} · actualisé à ${hm(state.loadedAt)}`
+      ? `Dernier relevé : ${fmtDateTime(lastT)} (il y a ${WM.fmtDuration(Date.now() - lastT)})${nextTxt} · actualisé à ${hm(state.loadedAt)}${who}`
       : 'Aucun relevé.';
   }
 
@@ -366,6 +388,7 @@
       </fieldset>`).join('');
     return `<form method="dialog" id="settings-form">
       <h2>Réglages</h2>
+      ${mode === 'server' ? '<p class="hint">Ces réglages s\'appliquent à tous les utilisateurs du site.</p>' : ''}
       <fieldset><legend>Données reçues de Live Objects</legend>
         <div class="grid2">
           <div class="field"><label>Historique chargé (années)</label><input name="historyYears" type="number" min="1" max="10" value="${cfg.historyYears}"></div>
@@ -418,8 +441,9 @@
     dlg.innerHTML = settingsHtml();
     $('#btn-detect').onclick = detectVariables;
     $('#btn-cancel').onclick = () => dlg.close();
-    $('#btn-reset').onclick = () => { cfg = JSON.parse(JSON.stringify(DEFAULT_CFG)); saveCfg(); dlg.close(); start(); };
-    $('#settings-form').onsubmit = () => { cfg = readForm($('#settings-form')); saveCfg(); setTimeout(start, 0); };
+    const persist = async () => { try { await saveCfg(); } catch (e) { window.alert('Enregistrement impossible : ' + e.message); } start(); };
+    $('#btn-reset').onclick = () => { cfg = JSON.parse(JSON.stringify(DEFAULT_CFG)); dlg.close(); persist(); };
+    $('#settings-form').onsubmit = () => { cfg = readForm($('#settings-form')); setTimeout(persist, 0); };
     dlg.showModal();
   }
 
@@ -592,6 +616,14 @@
     try { localStorage.setItem('wm.theme', t || 'auto'); } catch (e) { /* ignore */ }
   }
 
+  /* ---------- Rôles : le bureau modifie, les colotis consultent ---------- */
+
+  const canEdit = () => mode !== 'server' || (state.me && state.me.role === 'admin');
+  function applyRole() {
+    $('#btn-settings').hidden = !canEdit();
+    $('#btn-readings').hidden = !canEdit();
+  }
+
   /* ---------- Orchestration ---------- */
 
   function renderAll() {
@@ -601,6 +633,14 @@
   async function start() {
     clearInterval(timer);
     mode = await detectMode();
+    state.me = null;
+    if (mode === 'server') {
+      try {
+        const [me, conf] = await Promise.all([apiGet('me', {}), apiGet('config', {})]);
+        state.me = me; if (conf && conf.config) cfg = mergeCfg(conf.config);
+      } catch (e) { state.errors = [e.message]; }
+    }
+    applyRole();
     $('#status').textContent = 'Chargement…';
     await loadAll();
     renderAll();

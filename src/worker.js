@@ -1,21 +1,24 @@
 /*
  * Worker Cloudflare : reçoit les messages de Live Objects (HTTPS push), les stocke dans D1,
- * et sert le tableau de bord (public/) protégé par mot de passe.
+ * et sert le tableau de bord (public/), protégé par la connexion de l'ASL (connexion unique).
  *
  * Routes
  *   POST /ingest        Live Objects -> ici. Clé INGEST_KEY dans l'en-tête `Device-Token` (ou `X-Api-Key`,
  *                       `Authorization: <clé>` / `Bearer <clé>`, ou paramètre ?key=, à éviter : visible dans les journaux). Pas de mot de passe de tableau de bord.
- *   GET  /api/data      lectures d'une variable (utilisé par le tableau de bord)
- *   GET  /api/variables variables connues + dernière valeur
- *   GET  /api/events    derniers messages bruts reçus (diagnostic)
- *   GET/POST/DELETE /api/readings   liste, ajout/correction, suppression d'un relevé (saisie manuelle)
- *   GET  /api/status    sonde
+ *   GET  /sso/callback  retour de l'ASL avec un jeton signé de 60 s -> ouvre une session de 12 h
+ *   Tout le reste exige une session. Tous les colotis peuvent lire ; seul le bureau (rôle « admin » de l'ASL) écrit :
+ *   GET  /api/status, /api/me, /api/data, /api/config          lecture, tous les connectés
+ *   PUT  /api/config                                            réglages communs        (bureau)
+ *   GET  /api/variables, /api/events                            diagnostic              (bureau)
+ *   GET/POST/DELETE /api/readings                               liste, ajout, correction, suppression d'un relevé (bureau)
  *   tout le reste       fichiers de public/ (intégrés au Worker)
  *
- * Secrets (npx wrangler secret put ...) : DASHBOARD_PASSWORD, INGEST_KEY
+ * Non connecté : les pages renvoient vers l'ASL (qui renvoie ici une fois connecté), les appels d'API reçoivent 401.
+ * Secrets (npx wrangler secret put ...) : SSO_SECRET (partagé avec l'ASL), INGEST_KEY. Variable : ASL_URL.
  * Sans l'un de ces secrets, la partie concernée répond 503 : jamais ouverte par oubli.
  */
 import { parseIngest } from './ingest.js';
+import { SESSION_COOKIE, getCookie, makeSession, safeNext, sessionCookie, verify } from './auth.js';
 import ASSETS from './assets.js'; // généré depuis public/ par scripts/build-assets.mjs
 
 const MAX_BODY = 1_000_000;   // octets
@@ -32,14 +35,6 @@ const digest = async (text) => new Uint8Array(await crypto.subtle.digest('SHA-25
 async function safeEqual(a, b) {
   const [x, y] = await Promise.all([digest(a), digest(b)]);
   return crypto.subtle.timingSafeEqual(x, y);
-}
-
-async function dashboardAuthorized(request, env) {
-  const header = request.headers.get('Authorization') || '';
-  if (!header.startsWith('Basic ')) return false;
-  let decoded;
-  try { decoded = atob(header.slice(6)); } catch { return false; }
-  return safeEqual(decoded.slice(decoded.indexOf(':') + 1), env.DASHBOARD_PASSWORD);
 }
 
 async function ingestAuthorized(request, url, env) {
@@ -90,9 +85,9 @@ const VARIABLE_RE = /^[A-Za-z0-9_.-]{1,80}$/;
 const MIN_TS = Date.UTC(2000, 0, 1);
 
 /**
- * Les écritures passent par l'authentification du navigateur (Basic), envoyée automatiquement :
- * sans garde-fou, un site tiers pourrait faire écrire à l'insu de l'utilisateur (CSRF). On exige donc
- * un en-tête personnalisé (bloqué en cross-origin sans CORS) et, s'il est présent, un Origin identique.
+ * Le cookie de session est envoyé automatiquement par le navigateur : sans garde-fou, un site tiers pourrait
+ * faire écrire à l'insu de l'utilisateur (CSRF). On exige donc un en-tête personnalisé (bloqué en cross-origin
+ * sans CORS) et, s'il est présent, un Origin identique (en plus de SameSite=Lax sur le cookie).
  */
 function writeAllowed(request, url) {
   if (request.headers.get('X-Requested-With') !== 'eau-dashboard') return false;
@@ -149,11 +144,54 @@ async function handleReadings(request, url, env) {
   return json({ status: false, message: 'Méthode non autorisée' }, 405);
 }
 
-async function handleApi(request, url, env) {
+const CONFIG_KEY = 'main';
+const NUM = (v, min, max, fallback) => (Number.isFinite(Number(v)) ? Math.min(max, Math.max(min, Number(v))) : fallback);
+
+/** Reconstruit la configuration à partir de champs connus, bornés : rien d'autre n'est conservé. */
+function sanitizeConfig(c) {
+  if (!c || typeof c !== 'object' || !Array.isArray(c.meters) || c.meters.length < 1 || c.meters.length > 4) return null;
+  const meters = [];
+  for (const m of c.meters) {
+    if (!m || typeof m !== 'object' || !VARIABLE_RE.test(String(m.variable)) || !/^[a-z0-9_-]{1,30}$/.test(String(m.id))) return null;
+    const a = m.alerts && typeof m.alerts === 'object' ? m.alerts : {};
+    const alerts = {};
+    for (const k of ['dailyLimitL', 'monthlyLimitL', 'maxFlowLph', 'leakHours', 'quietFromH', 'quietToH', 'quietMaxL', 'baseFlowRatio', 'baseFlowMinLph', 'spikeRatio', 'staleHours']) {
+      alerts[k] = NUM(a[k], 0, 1e9, 0);
+    }
+    meters.push({ id: String(m.id), name: String(m.name ?? '').slice(0, 60) || String(m.id), variable: String(m.variable),
+      litresPerUnit: NUM(m.litresPerUnit, 1e-6, 1e6, 1), slot: NUM(m.slot, 1, 8, 1), alerts });
+  }
+  return { historyYears: NUM(c.historyYears, 1, 10, 3), refreshMin: NUM(c.refreshMin, 1, 1440, 10), meters };
+}
+
+const FORBIDDEN = () => json({ status: false, message: 'Réservé au bureau' }, 403);
+
+async function handleApi(request, url, env, session) {
   const p = url.pathname;
-  if (p === '/api/readings') return handleReadings(request, url, env);
+  const admin = session.role === 'admin';
+  if (p === '/api/readings') return admin ? handleReadings(request, url, env) : FORBIDDEN();
+
+  if (p === '/api/config' && request.method === 'PUT') {
+    if (!admin) return FORBIDDEN();
+    if (!writeAllowed(request, url)) return json({ status: false, message: 'Requête refusée' }, 403);
+    const text = await request.text();
+    if (text.length > 20000) return json({ status: false, message: 'Configuration trop volumineuse' }, 413);
+    let body; try { body = JSON.parse(text); } catch { return json({ status: false, message: 'JSON invalide' }, 400); }
+    const cfg = sanitizeConfig(body && body.config);
+    if (!cfg) return json({ status: false, message: 'Configuration invalide' }, 400);
+    await env.DB.prepare(`INSERT INTO config (key, value, updated_at, updated_by) VALUES (?, ?, ?, ?)
+      ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at, updated_by = excluded.updated_by`)
+      .bind(CONFIG_KEY, JSON.stringify(cfg), Date.now(), String(session.email || session.name || session.sub).slice(0, 120)).run();
+    return json({ status: true });
+  }
+
   if (request.method !== 'GET') return json({ status: false, message: 'Méthode non autorisée' }, 405);
   if (p === '/api/status') return json({ ok: true });
+  if (p === '/api/me') return json({ status: true, result: { name: session.name || session.email || '', role: session.role } });
+  if (p === '/api/config') {
+    const row = await env.DB.prepare('SELECT value, updated_at, updated_by FROM config WHERE key = ?').bind(CONFIG_KEY).first();
+    return json({ status: true, result: row ? { config: JSON.parse(row.value), updatedAt: new Date(row.updated_at).toISOString(), updatedBy: row.updated_by } : { config: null } });
+  }
 
   if (p === '/api/data') {
     const variable = url.searchParams.get('variable');
@@ -166,6 +204,10 @@ async function handleApi(request, url, env) {
       .prepare(`SELECT ts, value, source FROM readings WHERE variable = ? AND ts >= ? ORDER BY ts ${order} LIMIT ? OFFSET ?`)
       .bind(variable, start, qty, skip).all();
     return json({ status: true, result: results.map((r) => ({ variable, value: r.value, time: new Date(r.ts).toISOString(), source: r.source })) });
+  }
+
+  if (p === '/api/variables' || p === '/api/events') {
+    if (!admin) return FORBIDDEN();
   }
 
   if (p === '/api/variables') {
@@ -190,9 +232,38 @@ function serveAsset(request, url) {
   const path = url.pathname === '/' ? '/index.html' : url.pathname;
   const a = Object.prototype.hasOwnProperty.call(ASSETS, path) ? ASSETS[path] : null;
   if (!a) return new Response('Introuvable', { status: 404, headers: { 'content-type': 'text/plain; charset=utf-8' } });
-  const headers = { 'content-type': a.type, etag: a.etag, 'cache-control': 'private, no-cache' };
+  const headers = { 'content-type': a.type, etag: a.etag, 'cache-control': 'private, no-cache', ...SECURITY_HEADERS };
   if (request.headers.get('If-None-Match') === a.etag) return new Response(null, { status: 304, headers });
   return new Response(request.method === 'HEAD' ? null : a.body, { headers });
+}
+
+/** En-têtes de sécurité du site (pages et fichiers) : le site gère des sessions, il ne doit être ni intégré ailleurs ni charger de code étranger. */
+const SECURITY_HEADERS = {
+  'Content-Security-Policy': "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+  'X-Content-Type-Options': 'nosniff',
+  'Referrer-Policy': 'same-origin',
+  'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
+  'X-Frame-Options': 'DENY',
+};
+
+const html = (body, status = 200) => new Response(`<!doctype html><html lang="fr"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Consommation d'eau</title><link rel="stylesheet" href="/style.css"><body><main class="wrap">${body}</main></body></html>`,
+  { status, headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', ...SECURITY_HEADERS } });
+
+/** Retour de l'ASL : échange le jeton signé (60 s, usage unique) contre une session de 12 h. */
+async function handleSsoCallback(request, url, env) {
+  const retry = `<p><a href="/">Se reconnecter</a></p>`;
+  const p = await verify(url.searchParams.get('token'), env.SSO_SECRET, 'eau');
+  if (!p || typeof p.nonce !== 'string' || p.nonce.length < 16 || p.nonce.length > 100) {
+    return html(`<h1>Connexion impossible</h1><p>Le lien de connexion est invalide ou expiré.</p>${retry}`, 400);
+  }
+  const ins = await env.DB.prepare('INSERT OR IGNORE INTO sso_nonces (nonce, exp) VALUES (?, ?)').bind(p.nonce, p.exp).run();
+  if (!ins.meta.changes) return html(`<h1>Connexion impossible</h1><p>Ce lien de connexion a déjà été utilisé.</p>${retry}`, 400);
+  await env.DB.prepare('DELETE FROM sso_nonces WHERE exp < ?').bind(Date.now()).run();
+  const clip = (v) => (typeof v === 'string' ? v.slice(0, 120) : '');
+  const token = await makeSession({ sub: String(p.sub ?? '').slice(0, 40), email: clip(p.email), name: clip(p.name), role: p.role }, env.SSO_SECRET);
+  return new Response(null, { status: 302, headers: {
+    Location: safeNext(url.searchParams.get('next')), 'Set-Cookie': sessionCookie(token, url.protocol === 'https:'), 'Cache-Control': 'no-store',
+  } });
 }
 
 export default {
@@ -201,16 +272,23 @@ export default {
 
     if (url.pathname === '/ingest') return handleIngest(request, url, env);
 
-    if (!env.DASHBOARD_PASSWORD) {
-      return new Response('Tableau de bord non configuré : définissez le secret DASHBOARD_PASSWORD (voir README).',
+    if (!env.SSO_SECRET || !env.ASL_URL) {
+      return new Response('Connexion non configurée : définissez le secret SSO_SECRET et la variable ASL_URL (voir README).',
         { status: 503, headers: { 'content-type': 'text/plain; charset=utf-8' } });
     }
-    if (!(await dashboardAuthorized(request, env))) {
-      return new Response('Authentification requise.', {
-        status: 401, headers: { 'WWW-Authenticate': 'Basic realm="Consommation eau", charset="UTF-8"' },
-      });
+    if (url.pathname === '/sso/callback') return handleSsoCallback(request, url, env);
+
+    const cookie = getCookie(request, SESSION_COOKIE);
+    const session = cookie ? await verify(cookie, env.SSO_SECRET, 'eau-session') : null;
+    if (!session) {
+      const navigation = request.method === 'GET' && !url.pathname.startsWith('/api/') && (request.headers.get('Accept') || '').includes('text/html');
+      if (navigation) {
+        const back = encodeURIComponent(safeNext(url.pathname + url.search));
+        return new Response(null, { status: 302, headers: { Location: `${env.ASL_URL.replace(/\/$/, '')}/sso/eau?next=${back}`, 'Cache-Control': 'no-store' } });
+      }
+      return json({ status: false, message: 'Non connecté' }, 401);
     }
-    if (url.pathname.startsWith('/api/')) return handleApi(request, url, env);
+    if (url.pathname.startsWith('/api/')) return handleApi(request, url, env, session);
     return serveAsset(request, url);
   },
 };

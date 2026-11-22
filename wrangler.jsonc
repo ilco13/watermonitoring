@@ -5,6 +5,7 @@
   "build": { "command": "node scripts/build-assets.mjs", "watch_dir": "public" },
   "workers_dev": true,
   "preview_urls": false,
+  "vars": { "ASL_URL": "https://asl.pierrotcolombine.workers.dev" },
   "d1_databases": [
     {
       "binding": "DB",
