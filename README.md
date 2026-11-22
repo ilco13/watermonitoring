@@ -55,13 +55,13 @@ npx wrangler secret put INGEST_KEY
 npm run deploy
 ```
 
-L'adresse est du type `https://eau-maison.<votre-sous-domaine>.workers.dev`. Sans ces deux secrets, le Worker refuse tout (503) : rien n'est jamais ouvert par oubli.
+L'adresse est du type `https://eau.<votre-sous-domaine>.workers.dev`. Sans ces deux secrets, le Worker refuse tout (503) : rien n'est jamais ouvert par oubli.
 
 ### Côté Live Objects
 
 Dans la politique d'action HTTPS push que vous aviez pour TagoIO, ou dans une nouvelle :
 
-- **URL** : `https://eau-maison.<votre-sous-domaine>.workers.dev/ingest`
+- **URL** : `https://eau.<votre-sous-domaine>.workers.dev/ingest`
 - **En-tête** : `Device-Token: <la clé INGEST_KEY>` (`Authorization: <clé>`, `Authorization: Bearer <clé>` et `X-Api-Key: <clé>` marchent aussi)
 - **Corps** : laissez celui que vous envoyiez à TagoIO.
 
@@ -74,7 +74,7 @@ Un message que le Worker ne comprend pas reçoit une réponse **422**, que Live 
 Pour garder vos courbes et les comparaisons avec l'an dernier, exportez les données de TagoIO (JSON ou CSV avec les colonnes `variable`, `value`, `time`), puis :
 
 ```bash
-node scripts/import.mjs export.json https://eau-maison.<votre-sous-domaine>.workers.dev <INGEST_KEY>
+node scripts/import.mjs export.json https://eau.<votre-sous-domaine>.workers.dev <INGEST_KEY>
 ```
 
 Cela peut être relancé sans risque : les relevés déjà présents sont ignorés. Vos variables TagoIO s'appelaient `index_eau_1` et `index_eau_2`, comme ici.

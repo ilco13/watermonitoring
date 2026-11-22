@@ -2,7 +2,7 @@
 /*
  * Reprend un historique (export TagoIO, JSON ou CSV) dans le tableau de bord, via /ingest.
  *
- *   node scripts/import.mjs <fichier.json|fichier.csv> <https://eau-maison.xxx.workers.dev> <INGEST_KEY>
+ *   node scripts/import.mjs <fichier.json|fichier.csv> <https://eau.xxx.workers.dev> <INGEST_KEY>
  *
  * JSON : tableau d'objets {variable, value, time} ou réponse de l'API TagoIO {"result":[...]}.
  * CSV  : première ligne = en-têtes, dont au minimum variable, value, time (séparateur , ou ;).
