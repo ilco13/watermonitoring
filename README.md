@@ -32,6 +32,8 @@ Les variables associées à chaque compteur se changent dans Réglages.
 
 ## Mise en route (hébergement gratuit Cloudflare)
 
+> **État actuel** : le Worker est déployé sur `https://eau.pierrotcolombine.workers.dev`, avec sa base D1 `eau` (identifiant déjà inscrit dans `wrangler.jsonc`) et ses deux secrets. Les étapes ci-dessous servent à le refaire à l'identique, ou à changer un secret (`npx wrangler secret put INGEST_KEY`).
+
 Prérequis : Node.js et le compte Cloudflare gratuit déjà utilisé pour l'ASL. Dans le dossier du projet :
 
 ```bash
@@ -103,13 +105,14 @@ curl -X POST localhost:8787/ingest -H 'Device-Token: cle' \
 
 | Fichier | Rôle |
 |---|---|
-| `src/worker.js` | réception `/ingest`, API de lecture, mot de passe, fichiers statiques |
+| `src/worker.js` | réception `/ingest`, API de lecture, mot de passe, service des fichiers de `public/` |
 | `src/ingest.js` | extraction des mesures d'un message (Adeunis `genericSensor`, TagoIO, Live Objects) |
 | `migrations/` | schéma de la base D1 |
 | `public/lib.js` | calculs purs : intervalles, répartition par période, alertes, profil horaire |
 | `public/app.js` | interface : cartes, graphiques, réglages |
 | `public/demo.js` | données de démonstration |
 | `public/vendor/chart.umd.js` | Chart.js 4.4.1 (copié, aucun CDN) |
+| `scripts/build-assets.mjs` | intègre `public/` dans le Worker (`src/assets.js`, généré, lancé par `wrangler dev` et `wrangler deploy`) |
 | `scripts/import.mjs` | reprise d'un historique JSON ou CSV |
 
 Les jours, mois et années suivent l'heure locale du navigateur.

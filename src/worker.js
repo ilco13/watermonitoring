@@ -9,12 +9,13 @@
  *   GET  /api/variables variables connues + dernière valeur
  *   GET  /api/events    derniers messages bruts reçus (diagnostic)
  *   GET  /api/status    sonde
- *   tout le reste       fichiers statiques
+ *   tout le reste       fichiers de public/ (intégrés au Worker)
  *
  * Secrets (npx wrangler secret put ...) : DASHBOARD_PASSWORD, INGEST_KEY
  * Sans l'un de ces secrets, la partie concernée répond 503 : jamais ouverte par oubli.
  */
 import { parseIngest } from './ingest.js';
+import ASSETS from './assets.js'; // généré depuis public/ par scripts/build-assets.mjs
 
 const MAX_BODY = 1_000_000;   // octets
 const KEEP_EVENTS = 200;
@@ -118,6 +119,16 @@ async function handleApi(request, url, env) {
   return json({ status: false, message: 'Route inconnue' }, 404);
 }
 
+function serveAsset(request, url) {
+  if (request.method !== 'GET' && request.method !== 'HEAD') return new Response('Méthode non autorisée', { status: 405 });
+  const path = url.pathname === '/' ? '/index.html' : url.pathname;
+  const a = Object.prototype.hasOwnProperty.call(ASSETS, path) ? ASSETS[path] : null;
+  if (!a) return new Response('Introuvable', { status: 404, headers: { 'content-type': 'text/plain; charset=utf-8' } });
+  const headers = { 'content-type': a.type, etag: a.etag, 'cache-control': 'private, no-cache' };
+  if (request.headers.get('If-None-Match') === a.etag) return new Response(null, { status: 304, headers });
+  return new Response(request.method === 'HEAD' ? null : a.body, { headers });
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -137,6 +148,6 @@ export default {
       if (request.method !== 'GET') return json({ status: false, message: 'Méthode non autorisée' }, 405);
       return handleApi(request, url, env);
     }
-    return env.ASSETS.fetch(request);
+    return serveAsset(request, url);
   },
 };

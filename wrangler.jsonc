@@ -2,18 +2,14 @@
   "name": "eau",
   "main": "src/worker.js",
   "compatibility_date": "2025-06-01",
-  "assets": {
-    "directory": "./public",
-    "binding": "ASSETS",
-    "run_worker_first": true
-  },
+  "build": { "command": "node scripts/build-assets.mjs", "watch_dir": "public" },
   "workers_dev": true,
   "preview_urls": false,
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "eau",
-      "database_id": "REMPLACER-PAR-LID-AFFICHE-PAR-wrangler-d1-create",
+      "database_id": "b8c3671b-f65a-47ae-8ce3-f6eb368ecab2",
       "migrations_dir": "migrations"
     }
   ]
