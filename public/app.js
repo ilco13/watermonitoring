@@ -452,10 +452,11 @@
       </ul>
       <p>Les alertes critiques et importantes sont aussi envoyées <strong>par mail au bureau</strong> (à l'apparition, rappel toutes les 24 h, puis au rétablissement).</p>
       <h3>Des seuils qui suivent les besoins</h3>
-      <p>Pour l'eau potable, le site apprend la consommation <strong>normale par habitant</strong> (les 28 derniers jours normaux) et surveille l'écart : plus de maisons ou d'habitants ne déclenche pas de fausse alerte, une fuite (l'eau ne descend plus à zéro la nuit) ou un gros écart de consommation, si. Une hausse lente est suivie automatiquement ; un jour anormal n'est <strong>jamais</strong> appris comme « normal » tant qu'on ne l'a pas décidé.</p>
+      <p>Pour l'eau potable, le site apprend la consommation <strong>normale par maison habitée</strong> (les 28 derniers jours normaux) et surveille l'écart : l'arrivée de nouvelles maisons ne déclenche pas de fausse alerte, une fuite (l'eau ne descend plus à zéro la nuit) ou un gros écart de consommation, si. Une hausse lente est suivie automatiquement ; un jour anormal n'est <strong>jamais</strong> appris comme « normal » tant qu'on ne l'a pas décidé.</p>
       <ul>
-        <li><strong>Nouveaux habitants, nouvelles maisons</strong> : annoncez-les dans Paramètres → Situation du lotissement (nombre d'habitants au total à partir d'une date, y compris dans le futur). Le niveau normal monte ce jour-là.</li>
-        <li><strong>Événement ponctuel</strong> (remplissage de piscine, travaux) : annoncez-le en « Événements exceptionnels » ; les alertes de consommation sont suspendues et ces jours ne sont pas appris.</li>
+        <li><strong>Nouvelle maison habitée</strong> : annoncez-la dans Paramètres → Situation du lotissement (nombre de maisons habitées au total à partir d'une date, y compris dans le futur). Le niveau normal monte ce jour-là.</li>
+        <li><strong>Maisons en travaux</strong> : leur consommation est irrégulière ; indiquez leur nombre, le site élargit un peu la tolérance (15 % par chantier). Les compléments d'eau habituels des piscines sont appris comme normaux ; le remplissage d'une piscine est un événement exceptionnel.</li>
+        <li><strong>Événement ponctuel</strong> (remplissage de piscine, grosse fête) : annoncez-le en « Événements exceptionnels » ; les alertes de consommation sont suspendues et ces jours ne sont pas appris.</li>
         <li><strong>Changement durable non annoncé</strong> (une piscine qui se remplit en continu…) : sur l'alerte, « C'est le nouveau normal » ; le site réapprend pendant 7 jours.</li>
       </ul>
       <h3>Réservé au bureau</h3>
@@ -472,7 +473,7 @@
 
   /* ---------- Paramètres ---------- */
 
-  const peopleRow = (x) => `<div class="rowline" data-people><input type="date" name="p_from" value="${esc(x.from)}" aria-label="À partir du"><input type="number" name="p_n" min="1" max="100000" value="${x.n}" aria-label="Habitants"><span>habitants</span><button type="button" class="dlg-x" data-rm aria-label="Supprimer cette ligne" title="Supprimer">✕</button></div>`;
+  const peopleRow = (x) => `<div class="rowline" data-people><input type="date" name="p_from" value="${esc(x.from)}" aria-label="À partir du"><input type="number" name="p_n" min="1" max="100000" value="${x.n}" aria-label="Maisons habitées"><span>maisons habitées</span><button type="button" class="dlg-x" data-rm aria-label="Supprimer cette ligne" title="Supprimer">✕</button></div>`;
   const eventRow = (x) => `<div class="rowline" data-event><input name="e_label" placeholder="Ex. remplissage de piscine" value="${esc(x.label)}" aria-label="Événement"><input type="date" name="e_from" value="${esc(x.from)}" aria-label="Du"><span>au</span><input type="date" name="e_to" value="${esc(x.to)}" aria-label="Au"><button type="button" class="dlg-x" data-rm aria-label="Supprimer cet événement" title="Supprimer">✕</button></div>`;
 
   /** Ce que le site a appris d'un compteur (avec les paramètres enregistrés) : niveau normal, seuils. */
@@ -483,17 +484,18 @@
     const since = m.since ? ` (apprentissage depuis le ${m.since})` : '';
     if (!a.ready) return `Apprentissage en cours : ${a.learned} journée${a.learned > 1 ? 's' : ''} normale${a.learned > 1 ? 's' : ''} retenue${a.learned > 1 ? 's' : ''} sur 7 nécessaires${since}. Les alertes automatiques de volume et de débit de fond commencent ensuite ; les autres règles restent actives.`;
     const lim = [Number.isFinite(a.vMax) ? `la consommation du jour dépasse ${WM.fmtVolume(a.vMax)}` : '', Number.isFinite(a.fMax) ? `l'eau ne descend jamais sous ${Math.round(a.fMax)} L/h pendant 24 h` : ''].filter(Boolean).join(' ou ');
-    return `Niveau normal appris pour ${a.people} habitant${a.people > 1 ? 's' : ''} : environ ${WM.fmtVolume(a.ref.v)} par jour (${WM.fmtVolume(a.ref.v / a.people)} par habitant), débit de fond ≈ ${Math.round(a.ref.f)} L/h${since}. ${lim ? 'Alerte si ' + lim + '.' : ''}`;
+    return `Niveau normal appris pour ${a.people} maison${a.people > 1 ? 's' : ''} habitée${a.people > 1 ? 's' : ''} : environ ${WM.fmtVolume(a.ref.v)} par jour (${WM.fmtVolume(a.ref.v / a.people)} par maison), débit de fond ≈ ${Math.round(a.ref.f)} L/h${since}. ${lim ? 'Alerte si ' + lim + '.' : ''}`;
   }
 
   function settingsHtml() {
     const num = (name, label, v, extra = '', hint = '') => `<div class="field"><label>${label}</label><input name="${name}" type="number" min="0" ${extra} value="${v}">${hint ? `<span class="hint">${hint}</span>` : ''}</div>`;
     const siteFs = `<fieldset id="site-fs"><legend>Situation du lotissement</legend>
-        <p class="small">Le site apprend la consommation <strong>normale par habitant</strong> et surveille l'écart : l'arrivée de nouveaux habitants ou de nouvelles maisons ne déclenche donc pas de fausses alertes, alors qu'une fuite, elle, reste signalée. Annoncez ici le nombre d'habitants <strong>au total</strong>, à partir de chaque date (passée ou prévue).</p>
+        <p class="small">Le site apprend la consommation <strong>normale par maison habitée</strong> et surveille l'écart : l'arrivée d'une nouvelle maison habitée ne déclenche donc pas de fausse alerte, alors qu'une fuite, elle, reste signalée. Annoncez ici le nombre de maisons habitées <strong>au total</strong>, à partir de chaque date (passée ou prévue).</p>
         <div id="people-rows">${(cfg.site.people || []).map(peopleRow).join('')}</div>
-        <div><button class="btn" type="button" id="btn-add-people">Ajouter un changement d'habitants</button></div>
+        <div><button class="btn" type="button" id="btn-add-people">Ajouter un changement (nouvelle maison habitée)</button></div>
+        <div class="field"><label for="site-works">Maisons en travaux</label><input id="site-works" name="works" type="number" min="0" max="100" value="${cfg.site.works || 0}"><span class="hint">Leur consommation est irrégulière (béton, nettoyage, essais) : le site élargit un peu la tolérance sur le volume du jour (15 % par maison en travaux). Mettez 0 quand il n'y en a plus.</span></div>
         <h3>Événements exceptionnels</h3>
-        <p class="small muted">Remplissage de piscine, travaux, fête… Pendant ces jours les alertes de consommation sont suspendues et le site n'apprend rien de ces journées.</p>
+        <p class="small muted">Événements ponctuels : remplissage d'une piscine, grosse fête, essai d'une installation… Pendant ces jours les alertes de consommation sont suspendues et le site n'apprend rien de ces journées. (Les travaux qui durent se règlent plus haut avec « Maisons en travaux ».)</p>
         <div id="event-rows">${(cfg.site.events || []).map(eventRow).join('')}</div>
         <div><button class="btn" type="button" id="btn-add-event">Ajouter un événement</button></div></fieldset>`;
     const meterFs = cfg.meters.map((m, i) => `
@@ -507,7 +509,7 @@
           </select>
           <span class="hint" data-kind-hint></span></div>
         <div class="adaptive-box" data-adaptive-box>
-          <label class="check"><input type="checkbox" name="adaptive" ${m.adaptive ? 'checked' : ''}> Seuils automatiques : ils s'adaptent au nombre d'habitants</label>
+          <label class="check"><input type="checkbox" name="adaptive" ${m.adaptive ? 'checked' : ''}> Seuils automatiques : ils s'adaptent au nombre de maisons habitées</label>
           <input type="hidden" name="since" value="${esc(m.since || '')}">
           <p class="small muted" data-adaptive-info>${esc(adaptiveInfoText(m))}</p>
           <div><button class="btn" type="button" data-relearn>C'est le nouveau normal : réapprendre à partir d'aujourd'hui</button></div>
@@ -600,7 +602,7 @@
   function ruleSummary(a, adaptive) {
     const L = (x) => WM.fmtVolume(x), r = [];
     if (a.staleHours > 0) r.push(`aucun relevé depuis ${a.staleHours} h`);
-    if (adaptive && a.spikeRatio > 0) r.push(`consommation du jour × ${String(a.spikeRatio).replace('.', ',')} la normale (selon les habitants)`);
+    if (adaptive && a.spikeRatio > 0) r.push(`consommation du jour × ${String(a.spikeRatio).replace('.', ',')} la normale (selon les maisons habitées)`);
     if (a.dailyLimitL > 0) r.push(adaptive ? `plafond absolu de ${L(a.dailyLimitL)} par jour` : `plus de ${L(a.dailyLimitL)} par jour`);
     if (a.monthlyLimitL > 0) r.push(`plus de ${L(a.monthlyLimitL)} par mois`);
     if (a.maxFlowLph > 0) r.push(`débit supérieur à ${a.maxFlowLph} L/h`);
@@ -660,6 +662,7 @@
     const people = [...form.querySelectorAll('[data-people]')].map((r) => ({ from: val(r, 'p_from'), n: Math.round(Number(val(r, 'p_n'))) }))
       .filter((x) => /^\d{4}-\d{2}-\d{2}$/.test(x.from) && x.n >= 1).sort((a, b) => (a.from < b.from ? -1 : 1));
     next.site = {
+      works: Math.max(0, Math.round(Number(form.querySelector('[name="works"]').value) || 0)),
       people: people.length ? people : cfg.site.people,
       events: [...form.querySelectorAll('[data-event]')].map((r) => ({ label: val(r, 'e_label').trim() || 'Événement', from: val(r, 'e_from'), to: val(r, 'e_to') }))
         .filter((x) => /^\d{4}-\d{2}-\d{2}$/.test(x.from) && /^\d{4}-\d{2}-\d{2}$/.test(x.to) && x.from <= x.to),

@@ -258,7 +258,7 @@
 
   /* ---------- Alertes ---------- */
 
-  /* ---------- Alertes qui s'adaptent aux besoins (habitants, nouvelles maisons) ---------- */
+  /* ---------- Alertes qui s'adaptent aux besoins (maisons habitées, nouvelles maisons, travaux) ---------- */
 
   const DAY_KEY = /^\d{4}-\d{2}-\d{2}$/;
   const pad2 = (n) => String(n).padStart(2, '0');
@@ -266,7 +266,7 @@
   const keyToMs = (k) => { const [y, m, d] = k.split('-').map(Number); return new Date(y, m - 1, d).getTime(); };
   const REF_DAYS = 28;          // les 28 derniers jours « normaux » servent de référence
   const REF_MIN = 7;            // il en faut au moins 7 pour juger
-  const FLOOR_EXP = 0.5;        // le débit de fond (la nuit) augmente moins vite que le nombre d'habitants : racine carrée
+  const FLOOR_EXP = 0.5;        // le débit de fond (la nuit) augmente moins vite que le nombre de maisons habitées : racine carrée
 
   /** Habitants à une date (ms) : dernier changement annoncé avant cette date (le premier si la date est plus ancienne). */
   function peopleAt(site, ms) {
@@ -298,7 +298,7 @@
     return out;
   }
 
-  /** Niveau « normal » pour des habitants donnés, d'après les jours acceptés (volume et débit de fond ramenés à ces habitants). */
+  /** Niveau « normal » pour un nombre de maisons habitées donné, d'après les jours acceptés (volume et débit de fond ramenés à ce nombre). */
   function referenceFor(accepted, people, atMs) {
     // les 28 derniers jours normaux, aussi anciens soient-ils : tant qu'une anomalie dure, la référence reste celle d'avant
     const used = accepted.filter((d) => d.a < atMs).slice(-REF_DAYS);
@@ -313,7 +313,7 @@
   /**
    * Seuils qui suivent les besoins. On range chaque jour passé : « normal » (il entre dans la référence) ou « anormal » (il n'y entre pas,
    * donc une fuite ou un gros écart ne devient pas la nouvelle normalité), « exclu » (événement annoncé, relevés manquants, avant la
-   * remise à zéro). Les habitants annoncés (site.people) ramènent tout à un même niveau : une maison de plus n'est pas une fuite.
+   * remise à zéro). Les maisons habitées annoncées (site.people : nombre de maisons à partir d'une date) ramènent tout à un même niveau : une maison de plus n'est pas une fuite.
    * Une hausse lente (emménagements progressifs) est suivie par la référence (médiane des 28 derniers jours normaux).
    *   m.alerts.spikeRatio   : un jour est anormal au-delà de ce multiple du volume normal (0 = règle désactivée)
    *   m.alerts.baseFlowRatio / baseFlowMinLph : débit de fond anormal (comme avant, mais par rapport au niveau appris)
@@ -321,14 +321,16 @@
    */
   function adaptiveAssess(m, site, readings, intervals, now) {
     const a = m.alerts || {};
-    const info = { on: true, ready: false, people: 1, ref: null, vMax: null, fMax: null, learned: 0, event: false, since: m.since || '', days: [] };
+    const info = { on: true, ready: false, people: 1, tolerance: 1, ref: null, vMax: null, fMax: null, learned: 0, event: false, since: m.since || '', days: [] };
     if (!readings.length) return info;
     const lastT = readings[readings.length - 1].t, ref = Math.min(now, lastT);
     const sinceMs = m.since && DAY_KEY.test(m.since) ? keyToMs(m.since) : 0;
     const series = dailySeries(readings, intervals, ref, 200);
     const accepted = [];
+    // des maisons en travaux (béton, nettoyage, essais) consomment de façon irrégulière : tolérance élargie de 15 % par chantier, au plus ×2,5
+    const tol = 1 + Math.min(1.5, 0.15 * Math.max(0, Number(site && site.works) || 0));
     const limits = (r, P) => ({
-      vMax: a.spikeRatio > 0 ? a.spikeRatio * r.v : Infinity,
+      vMax: a.spikeRatio > 0 ? a.spikeRatio * tol * r.v : Infinity,
       fMax: a.baseFlowRatio > 0 ? Math.max(a.baseFlowRatio * r.f, r.f + (a.baseFlowMinLph || 0)) : Infinity,
     });
     for (const d of series) {
@@ -342,6 +344,7 @@
       info.days.push(d);
     }
     info.people = peopleAt(site, ref);
+    info.tolerance = tol;
     info.event = inEvent(site, dayKey(ref));
     info.learned = Math.min(REF_DAYS, accepted.length);
     const r = referenceFor(accepted, info.people, ref);
@@ -448,8 +451,8 @@
       }
     }
     if (adaptive && adaptive.ready && !adaptive.event) {
-      const P = adaptive.people, who = `${P} habitant${P > 1 ? 's' : ''}`;
-      const declare = ' Si c\'est attendu (remplissage de piscine, nouveaux habitants…), annoncez-le dans Paramètres.';
+      const P = adaptive.people, who = `${P} maison${P > 1 ? 's' : ''} habitée${P > 1 ? 's' : ''}`;
+      const declare = ' Si c\'est attendu (remplissage de piscine, nouvelle maison habitée…), annoncez-le dans Paramètres.';
       if (sum.today > adaptive.vMax) {
         out.push({ level: 'serious', code: 'daily', text: `Consommation du jour inhabituelle : ${fmtVolume(sum.today)} alors que la normale est d'environ ${fmtVolume(adaptive.ref.v)} pour ${who} (alerte au-delà de ${fmtVolume(adaptive.vMax)}).${declare}` });
       }
@@ -542,9 +545,9 @@
   const DEFAULT_CFG = {
     historyYears: 3,
     refreshMin: 10,
-    // Situation du lotissement : habitants (changements annoncés, à partir d'une date) et événements exceptionnels (piscine, travaux…)
+    // Situation du lotissement : maisons habitées (changements annoncés, à partir d'une date), maisons en travaux et événements exceptionnels (piscine, travaux…)
     // pendant lesquels les alertes de consommation sont suspendues et rien n'est appris.
-    site: { people: [{ from: '2026-01-01', n: 6 }], events: [] },
+    site: { people: [{ from: '2026-01-01', n: 5 }], works: 4, events: [] },
     // index_eau_1 = voie 0 (genericSensor "0") = eau potable ; index_eau_2 = voie 1 = arrosage ; index en litres
     meters: [
       { id: 'potable', name: 'Eau potable', variable: 'index_eau_1', litresPerUnit: 1, slot: 1, adaptive: true, since: '',
@@ -559,6 +562,7 @@
     const site = Object.assign({}, DEFAULT_CFG.site, saved.site && typeof saved.site === 'object' ? saved.site : {});
     if (!Array.isArray(site.people) || !site.people.length) site.people = JSON.parse(JSON.stringify(DEFAULT_CFG.site.people));
     if (!Array.isArray(site.events)) site.events = [];
+    site.works = Math.max(0, Math.round(Number(site.works) || 0));
     return Object.assign({}, DEFAULT_CFG, saved, {
       site,
       meters: DEFAULT_CFG.meters.map((m, i) => {

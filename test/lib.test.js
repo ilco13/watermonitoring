@@ -357,14 +357,14 @@ function gen({ days, peopleOn, extra = () => 0, floorExtra = () => 0, seed = 7 }
   return { readings: out, start };
 }
 const potable = (over = {}) => Object.assign({}, WM.mergeCfg(null).meters[0], over);
-const SITE6 = { people: [{ from: '2026-01-01', n: 6 }], events: [] };
+const SITE6 = { people: [{ from: '2026-01-01', n: 6 }], works: 0, events: [] };
 const codes = (m, site, g, dayIdx, hour = 23) => {
   const now = g.start + dayIdx * DAYMS + hour * H + 40 * 60e3;
   const rs = g.readings.filter((r) => r.t <= now), iv = WM.toIntervals(rs);
   return plain(WM.evaluateMeter(m, site, rs, iv, now)).map((a) => a.code).sort();
 };
 
-test('adaptatif : consommation normale de 6 habitants, aucune alerte, le niveau appris est le bon', () => {
+test('adaptatif : consommation normale de 6 maisons habitées, aucune alerte, le niveau appris est le bon', () => {
   const g = gen({ days: 45, peopleOn: () => 6 });
   for (const d of [20, 30, 44]) assert.deepEqual(codes(potable(), SITE6, g, d), [], `jour ${d}`);
   const rs = g.readings, iv = WM.toIntervals(rs), now = g.start + 44 * DAYMS + 23 * H;
@@ -374,12 +374,12 @@ test('adaptatif : consommation normale de 6 habitants, aucune alerte, le niveau 
   assert.ok(a.ref.f < 3, 'débit de fond normal ≈ 1 L/h : ' + a.ref.f);
 });
 
-test('adaptatif : hausse progressive des besoins (6 → 14 habitants, jamais annoncée) : pas de fausse alerte', () => {
+test('adaptatif : hausse progressive des besoins (6 → 14 maisons habitées, jamais annoncée) : pas de fausse alerte', () => {
   const g = gen({ days: 90, peopleOn: (d) => 6 + 8 * Math.min(1, Math.max(0, (d - 20) / 60)) });
   for (let d = 25; d < 90; d += 3) assert.deepEqual(codes(potable(), SITE6, g, d), [], `jour ${d}`);
 });
 
-test('adaptatif : une hausse ANNONCÉE (6 → 14 habitants d\'un coup) ne déclenche rien, la même hausse non annoncée oui', () => {
+test('adaptatif : une hausse ANNONCÉE (6 → 14 maisons habitées d\'un coup) ne déclenche rien, la même hausse non annoncée oui', () => {
   const g = gen({ days: 60, peopleOn: (d) => (d < 40 ? 6 : 18) });          // ×3 d'un coup au jour 40
   const declared = { people: [{ from: '2026-01-01', n: 6 }, { from: '2026-07-11', n: 18 }], events: [] };   // jour 40 = 11 juillet
   for (const d of [40, 41, 45, 59]) assert.deepEqual(codes(potable(), declared, g, d), [], `annoncée, jour ${d}`);
@@ -394,7 +394,7 @@ test('adaptatif : « c\'est le nouveau normal » remet l\'apprentissage à zéro
   assert.deepEqual(codes(m, SITE6, g, 43), [], 'pendant l\'apprentissage (moins de 7 jours) : aucune alerte adaptative');
   for (const d of [50, 60, 69]) assert.deepEqual(codes(m, SITE6, g, d), [], `après apprentissage, jour ${d}`);
   const a = WM.adaptiveAssess(m, SITE6, g.readings.filter((r) => r.t <= g.start + 69 * DAYMS), WM.toIntervals(g.readings.filter((r) => r.t <= g.start + 69 * DAYMS)), g.start + 69 * DAYMS + 12 * H);
-  assert.ok(a.ready && a.ref.v > 2200 && a.ref.v < 3200, 'le niveau appris suit les 18 habitants : ' + a.ref.v);
+  assert.ok(a.ready && a.ref.v > 2200 && a.ref.v < 3200, 'le niveau appris suit les 18 maisons habitées : ' + a.ref.v);
 });
 
 test('adaptatif : une fuite (débit de fond +40 L/h) est signalée et ne devient jamais « normale »', () => {
@@ -403,7 +403,7 @@ test('adaptatif : une fuite (débit de fond +40 L/h) est signalée et ne devient
   assert.ok(codes(potable(), SITE6, g, 42).includes('baseflow'), 'détectée en 2 jours');
   for (const d of [55, 70, 79]) assert.ok(codes(potable(), SITE6, g, d).includes('baseflow'), `toujours signalée au jour ${d}`);
   const txt = plain(WM.evaluateMeter(potable(), SITE6, g.readings, WM.toIntervals(g.readings), g.start + 79 * DAYMS + 23 * H)).find((a) => a.code === 'baseflow').text;
-  assert.match(txt, /pour 6 habitants/);
+  assert.match(txt, /pour 6 maisons habitées/);
 });
 
 test('adaptatif : événement annoncé (remplissage de piscine) : pas d\'alerte, et la référence n\'est pas faussée', () => {
@@ -424,7 +424,7 @@ test('adaptatif : compteur non adaptatif (arrosage) : règles classiques inchang
   assert.deepEqual(plain(WM.evaluateMeter(arro, SITE6, rs, iv, now)), plain(WM.evaluateAlerts(arro.alerts, rs, iv, now)));
 });
 
-test('habitants : dernier changement annoncé avant la date ; réglages anciens migrés', () => {
+test('maisons habitées : dernier changement annoncé avant la date ; réglages anciens migrés', () => {
   const site = { people: [{ from: '2026-09-01', n: 6 }, { from: '2027-05-01', n: 14 }] };
   assert.equal(WM.peopleAt(site, at(2026, 8, 1)), 6);
   assert.equal(WM.peopleAt(site, at(2026, 12, 25)), 6);
@@ -434,5 +434,16 @@ test('habitants : dernier changement annoncé avant la date ; réglages anciens 
   assert.equal(old.meters[0].adaptive, true);
   assert.equal(old.meters[0].alerts.dailyLimitL, 0);           // l'ancien plafond fixe est abandonné
   assert.equal(old.meters[1].alerts.dailyLimitL, 3000);         // l'arrosage garde le sien
-  assert.equal(old.site.people[0].n, 6);
+  assert.equal(old.site.people[0].n, 5);
+});
+
+test('adaptatif : des maisons en travaux élargissent la tolérance sur le volume (un jour ×2,5 n\'alerte pas avec 4 chantiers)', () => {
+  const g = gen({ days: 50, peopleOn: (d) => (d === 45 ? 15 : 6) });          // le jour 45 : consommation ×2,5
+  assert.ok(codes(potable(), SITE6, g, 45).includes('daily'), 'sans chantier : alerte');
+  const works = { ...SITE6, works: 4 };                                       // tolérance ×1,6 → seuil à 3,2 × la normale
+  assert.deepEqual(codes(potable(), works, g, 45), [], 'avec 4 maisons en travaux : pas d\'alerte');
+  const g2 = gen({ days: 50, peopleOn: (d) => (d === 45 ? 24 : 6) });        // ×4 : même avec les chantiers, c'est anormal
+  assert.ok(codes(potable(), works, g2, 45).includes('daily'));
+  assert.equal(WM.mergeCfg(null).site.works, 4);
+  assert.equal(WM.mergeCfg(null).site.people[0].n, 5);
 });
