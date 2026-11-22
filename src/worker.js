@@ -12,6 +12,7 @@
  *   GET  /api/variables, /api/events                            diagnostic              (bureau)
  *   GET/POST/DELETE /api/readings                               liste, ajout, correction, suppression d'un relevé (bureau)
  *   GET  /api/export.csv                                        tous les relevés en CSV, pour une copie hors Cloudflare (bureau)
+ *   GET/POST /api/backup                                        état / lancement immédiat de la sauvegarde R2 (bureau)
  *   GET/POST /api/ingest-key                                    état / régénération de la clé Live Objects (bureau)
  *   POST /api/logout                                            ferme la session ici et renvoie l'adresse qui ferme aussi celle de l'ASL
  *   tout le reste       fichiers de public/ (intégrés au Worker)
@@ -223,6 +224,57 @@ async function ingestKeyStatus(env) {
   };
 }
 
+/** Tous les relevés en CSV (variable, time, value, source) : export téléchargé et sauvegarde R2. */
+async function buildCsv(env) {
+  const { results } = await env.DB.prepare('SELECT variable, ts, value, source FROM readings ORDER BY variable, ts').all();
+  const cell = (x) => (/[",\n\r]/.test(String(x)) ? `"${String(x).replace(/"/g, '""')}"` : String(x));
+  const lines = ['variable,time,value,source', ...results.map((r) => [r.variable, new Date(r.ts).toISOString(), r.value, r.source].map(cell).join(','))];
+  return { csv: lines.join('\n') + '\n', rows: results.length };
+}
+
+/**
+ * Sauvegarde dans R2 (liaison BACKUPS) : fichier CSV daté, écrit puis relu pour vérifier sa taille ; empreinte SHA-256 et nombre de
+ * lignes en métadonnées. Le résultat (succès ou erreur) est mémorisé pour l'écran Réglages. Les sauvegardes ne sont jamais supprimées
+ * (environ 130 Ko chacune : 7 Mo par an en hebdomadaire).
+ * @param {'hebdo'|'manuel'} kind
+ */
+async function runBackup(env, kind, session) {
+  const at = new Date();
+  const rec = { at: at.toISOString(), kind, by: session ? String(session.email || session.name || session.sub).slice(0, 120) : 'automatique' };
+  try {
+    if (!env.BACKUPS) throw new Error('R2 non configuré : liaison BACKUPS absente (voir README)');
+    const { csv, rows } = await buildCsv(env);
+    const bytes = new TextEncoder().encode(csv);
+    const key = kind === 'hebdo' ? `hebdo/releves-${rec.at.slice(0, 10)}.csv` : `manuel/releves-${rec.at.slice(0, 10)}T${rec.at.slice(11, 19).replace(/:/g, '-')}.csv`;
+    await env.BACKUPS.put(key, bytes, { httpMetadata: { contentType: 'text/csv; charset=utf-8' }, customMetadata: { rows: String(rows), sha256: await sha256hex(csv) } });
+    const head = await env.BACKUPS.head(key);
+    if (!head || head.size !== bytes.length) throw new Error(`Vérification impossible : taille écrite ${head ? head.size : 'inconnue'} au lieu de ${bytes.length}`);
+    Object.assign(rec, { ok: true, key, rows, bytes: head.size });
+  } catch (e) {
+    Object.assign(rec, { ok: false, error: String((e && e.message) || e).slice(0, 240) });
+  }
+  await env.DB.prepare(`INSERT INTO config (key, value, updated_at, updated_by) VALUES ('last_backup', ?, ?, NULL)
+    ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`).bind(JSON.stringify(rec), Date.now()).run();
+  return rec;
+}
+
+/** État pour l'écran Réglages : liaison présente ?, dernière sauvegarde, cinq fichiers les plus récents. */
+async function backupStatus(env) {
+  const row = await env.DB.prepare("SELECT value FROM config WHERE key = 'last_backup'").first();
+  const out = { configured: Boolean(env.BACKUPS), last: row ? JSON.parse(row.value) : null, files: [] };
+  if (env.BACKUPS) {
+    const all = [];
+    for (const prefix of ['hebdo/', 'manuel/']) {
+      const l = await env.BACKUPS.list({ prefix, limit: 1000, include: ['customMetadata'] });
+      all.push(...l.objects);
+    }
+    all.sort((a, b) => b.uploaded - a.uploaded);
+    out.total = all.length;
+    out.files = all.slice(0, 5).map((o) => ({ key: o.key, bytes: o.size, uploaded: o.uploaded.toISOString(), rows: o.customMetadata && o.customMetadata.rows ? Number(o.customMetadata.rows) : null }));
+  }
+  return out;
+}
+
 const FORBIDDEN = () => json({ status: false, message: 'Réservé au bureau' }, 403);
 
 /**
@@ -258,6 +310,14 @@ async function handleApi(request, url, env, session) {
     return json({ status: true });
   }
 
+  if (p === '/api/backup') {
+    if (!admin) return FORBIDDEN();
+    if (request.method === 'POST') {
+      if (!writeAllowed(request, url)) return json({ status: false, message: 'Requête refusée' }, 403);
+      return json({ status: true, result: await runBackup(env, 'manuel', session) });
+    }
+    if (request.method === 'GET') return json({ status: true, result: await backupStatus(env) });
+  }
   if (p === '/api/ingest-key') {
     if (!admin) return FORBIDDEN();
     if (request.method === 'POST') {
@@ -288,20 +348,19 @@ async function handleApi(request, url, env, session) {
     return json({ status: true, result: results.map((r) => ({ variable, value: r.value, time: new Date(r.ts).toISOString(), source: r.source })) });
   }
 
-  if (p === '/api/variables' || p === '/api/events' || p === '/api/export.csv') {
+  if (p === '/api/variables' || p === '/api/events' || p === '/api/export.csv' || p === '/api/backup') {
     if (!admin) return FORBIDDEN();
   }
 
   if (p === '/api/export.csv') {
     // Sauvegarde complète : variable, heure UTC (ISO), valeur brute (litres), origine. Se réimporte avec scripts/import.mjs.
-    const { results } = await env.DB.prepare('SELECT variable, ts, value, source FROM readings ORDER BY variable, ts').all();
-    const cell = (x) => (/[",\n\r]/.test(String(x)) ? `"${String(x).replace(/"/g, '""')}"` : String(x));
-    const lines = ['variable,time,value,source', ...results.map((r) => [r.variable, new Date(r.ts).toISOString(), r.value, r.source].map(cell).join(','))];
-    return new Response(lines.join('\n') + '\n', { headers: {
+    const { csv } = await buildCsv(env);
+    return new Response(csv, { headers: {
       'content-type': 'text/csv; charset=utf-8', 'cache-control': 'no-store',
       'content-disposition': `attachment; filename="releves-eau-${new Date().toISOString().slice(0, 10)}.csv"`,
     } });
   }
+
 
   if (p === '/api/variables') {
     const { results } = await env.DB.prepare(
@@ -371,6 +430,11 @@ async function handleSsoCallback(request, url, env) {
 }
 
 export default {
+  // Cron hebdomadaire (wrangler.jsonc) : sauvegarde des relevés dans R2
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(runBackup(env, 'hebdo', null));
+  },
+
   async fetch(request, env) {
     const url = new URL(request.url);
 

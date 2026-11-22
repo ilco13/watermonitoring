@@ -6,6 +6,8 @@
   "workers_dev": true,
   "preview_urls": false,
   "vars": { "ASL_URL": "https://asl.pierrotcolombine.workers.dev", "ASL_NAME": "Pierrot et Colombine" },
+  "r2_buckets": [{ "binding": "BACKUPS", "bucket_name": "eau-sauvegardes" }],
+  "triggers": { "crons": ["17 3 * * 1"] },
   "d1_databases": [
     {
       "binding": "DB",

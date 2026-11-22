@@ -464,7 +464,9 @@
       </fieldset>
       ${mode === 'server' ? '<fieldset><legend>Clé de réception Live Objects</legend><div id="key-box" class="small">Chargement…</div></fieldset>' : ''}
       ${mode === 'server' ? `<fieldset><legend>Sauvegarde des relevés</legend>
-        <p class="small">Tous les relevés sont conservés sans limite de durée. Gardez aussi une copie chez vous : le fichier CSV contient la variable, l'heure (UTC), la valeur en litres et l'origine (auto ou manuel).</p>
+        <p class="small">Tous les relevés sont conservés sans limite de durée.</p>
+        <div id="backup-box" class="small">Chargement…</div>
+        <p class="small">Vous pouvez aussi garder une copie chez vous : le fichier CSV contient la variable, l'heure (UTC), la valeur en litres et l'origine (auto ou manuel).</p>
         <div><a class="btn" href="api/export.csv" download>Télécharger tous les relevés (CSV)</a></div>
         <p class="hint">Se réimporte avec <code>scripts/import.mjs</code> (voir le README). La restauration redonne les mêmes relevés, origine comprise.</p></fieldset>` : ''}
       ${meterFs}
@@ -532,6 +534,34 @@
     } catch (e) { box.textContent = 'Lecture impossible : ' + e.message; }
   }
 
+  async function loadBackupBox() {
+    const box = $('#backup-box'); if (!box) return;
+    try {
+      const st = await apiGet('backup', {});
+      const d = (iso) => fmtFull(Date.parse(iso));
+      const kb = (b) => `${Math.max(1, Math.round(b / 1024))} Ko`;
+      let html = '';
+      if (!st.configured) html = '<p class="rd-msg err">Sauvegarde automatique non configurée : le stockage R2 n\'est pas relié à ce site (voir le README).</p>';
+      else {
+        html += '<p>Sauvegarde automatique <strong>chaque lundi vers R2</strong> (bucket <code>eau-sauvegardes</code>). Les sauvegardes ne sont jamais supprimées.</p>';
+        if (st.last) html += st.last.ok
+          ? `<p>✓ Dernière sauvegarde : ${esc(d(st.last.at))} (${st.last.kind === 'hebdo' ? 'automatique' : 'manuelle, ' + esc(st.last.by)}) — ${st.last.rows} relevés, ${kb(st.last.bytes)}.</p>`
+          : `<p class="rd-msg err">✗ Dernière tentative en échec (${esc(d(st.last.at))}) : ${esc(st.last.error)}</p>`;
+        else html += '<p class="muted">Aucune sauvegarde pour l\'instant : la première aura lieu lundi, ou lancez-la maintenant.</p>';
+        html += `<p class="hint">${st.total} fichier${st.total > 1 ? 's' : ''} dans le bucket.</p><div><button class="btn" type="button" id="btn-backup-now">Sauvegarder maintenant</button></div>`;
+      }
+      box.innerHTML = html;
+      const b = $('#btn-backup-now'); if (b) b.onclick = backupNow;
+    } catch (e) { box.textContent = 'Lecture impossible : ' + e.message; }
+  }
+
+  async function backupNow() {
+    const b = $('#btn-backup-now'); b.disabled = true; b.textContent = 'Sauvegarde…';
+    try { const r = (await apiSend('POST', 'backup', {})).result; if (!r.ok) window.alert('Sauvegarde en échec : ' + r.error); }
+    catch (e) { window.alert('Sauvegarde impossible : ' + e.message); }
+    await loadBackupBox();
+  }
+
   function showNewKey(key) {
     $('#key-new').innerHTML = `<div class="flash-key"><p><strong>Nouvelle clé</strong> — copiez-la maintenant, elle ne sera plus jamais affichée :</p>
       <div class="key-row"><input id="key-value" type="text" readonly value="${esc(key)}" aria-label="Nouvelle clé de réception"><button class="btn" type="button" id="btn-copy-key">Copier</button></div>
@@ -557,7 +587,7 @@
     const dlg = $('#settings');
     dlg.innerHTML = settingsHtml();
     $('#btn-detect').onclick = detectVariables;
-    if (mode === 'server') loadKeyBox();
+    if (mode === 'server') { loadKeyBox(); loadBackupBox(); }
     $('#btn-cancel').onclick = () => dlg.close();
     const persist = async () => { try { await saveCfg(); } catch (e) { window.alert('Enregistrement impossible : ' + e.message); } start(); };
     $('#btn-reset').onclick = () => { cfg = JSON.parse(JSON.stringify(DEFAULT_CFG)); dlg.close(); persist(); };
