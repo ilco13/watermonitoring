@@ -758,13 +758,8 @@
 
   /* ---------- Thème ---------- */
 
-  function applyTheme(t) {
-    t = t === 'dark' ? 'dark' : 'light'; // clair par défaut, comme l'ASL ; le sombre est un choix explicite
-    document.documentElement.dataset.theme = t;
-    const tb = $('#btn-theme'); tb.textContent = t === 'dark' ? '☾' : '☀';
-    tb.setAttribute('aria-label', `Changer de thème (actuellement ${t === 'dark' ? 'sombre' : 'clair'})`); tb.title = t === 'dark' ? 'Thème sombre : passer au clair' : 'Thème clair : passer au sombre';
-    try { localStorage.setItem('wm.theme', t); } catch (e) { /* ignore */ }
-  }
+  // Le thème est géré par theme.js (commun avec l'ASL) ; on redessine les graphiques quand il change.
+  document.addEventListener('themechange', () => { try { renderView(); } catch (e) { /* page pas encore prête */ } });
 
   /* ---------- Rôles : le bureau modifie, les colotis consultent ---------- */
 
@@ -816,9 +811,6 @@
   }
 
   function init() {
-    let theme = 'light'; try { theme = localStorage.getItem('wm.theme') || 'light'; } catch (e) { /* ignore */ }
-    applyTheme(theme);
-    $('#btn-theme').onclick = () => { applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'); renderView(); };
     $('#btn-refresh').onclick = async () => { $('#status').textContent = 'Actualisation…'; await loadAll(true); renderAll(); };
     $('#btn-logout').onclick = async () => {
       try { location.href = (await apiSend('POST', 'logout', {})).result.url; }   // ferme la session ici puis celle de l'ASL
