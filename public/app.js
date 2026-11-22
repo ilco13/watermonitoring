@@ -8,24 +8,9 @@
   /* ---------- Configuration (stockée dans ce navigateur) ---------- */
 
   const CFG_KEY = 'wm.config.v4';
-  const DEFAULT_CFG = {
-    historyYears: 3,
-    refreshMin: 10,
-    // index_eau_1 = voie 0 (genericSensor "0") = eau potable ; index_eau_2 = voie 1 = arrosage ; index en litres
-    meters: [
-      { id: 'potable', name: 'Eau potable', variable: 'index_eau_1', litresPerUnit: 1, slot: 1,
-        alerts: { dailyLimitL: 4000, monthlyLimitL: 0, maxFlowLph: 1500, leakHours: 0, quietFromH: 0, quietToH: 0, quietMaxL: 0, baseFlowRatio: 2, baseFlowMinLph: 20, spikeRatio: 2.5, staleHours: 6 } },
-      { id: 'arrosage', name: 'Arrosage', variable: 'index_eau_2', litresPerUnit: 1, slot: 2,
-        alerts: { dailyLimitL: 3000, monthlyLimitL: 0, maxFlowLph: 1500, leakHours: 12, quietFromH: 6, quietToH: 18, quietMaxL: 10, baseFlowRatio: 0, baseFlowMinLph: 0, spikeRatio: 0, staleHours: 6 } },
-    ],
-  };
-
-  function mergeCfg(saved) {
-    if (!saved || typeof saved !== 'object') return JSON.parse(JSON.stringify(DEFAULT_CFG));
-    return Object.assign({}, DEFAULT_CFG, saved, {
-      meters: DEFAULT_CFG.meters.map((m, i) => Object.assign({}, m, (saved.meters || [])[i], { alerts: Object.assign({}, m.alerts, ((saved.meters || [])[i] || {}).alerts) })),
-    });
-  }
+  // Réglages par défaut et fusion : dans lib.js, partagés avec le Worker (contrôle automatique des alertes)
+  const DEFAULT_CFG = WM.DEFAULT_CFG;
+  const mergeCfg = WM.mergeCfg;
   function loadCfg() {
     try { return mergeCfg(JSON.parse(localStorage.getItem(CFG_KEY) || 'null')); } catch (e) { return mergeCfg(null); }
   }
@@ -390,10 +375,12 @@
     const max = Math.max(1, ...prof.flat());
     const days = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
     const dayNames = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche'];
-    const now = new Date(), nowRow = (now.getDay() + 6) % 7, nowCol = Math.floor(now.getHours() / 2);
     const tr = WM.trendVsUsual(d.readings, d.intervals, 4);
+    // case repérée : celle de la dernière tranche MESURÉE (le milieu de la tranche entre les deux derniers relevés), pas l'heure qu'il est
+    const refT = tr ? (tr.t0 + tr.t1) / 2 : d.readings[d.readings.length - 1].t - 3600e3;
+    const ref = new Date(refT), nowRow = (ref.getDay() + 6) % 7, nowCol = Math.floor(ref.getHours() / 2);
     const vol = (x) => WM.fmtVolume(x);
-    // pastille dans la case « maintenant » : le sens de la tendance (jamais la seule couleur)
+    // pastille dans la case de la dernière mesure : le sens de la tendance (jamais la seule couleur)
     const tag = !tr || tr.level === 'unknown' ? ['●', 'ici']
       : tr.level === 'up' ? ['▲', `+${Math.round(tr.pct)} %`] : tr.level === 'down' ? ['▼', `−${Math.abs(Math.round(tr.pct))} %`]
         : tr.level === 'unusual' ? ['!', 'inhabituel'] : ['=', 'habituel'];
@@ -404,7 +391,7 @@
         const isNow = r === nowRow && c === nowCol;
         const pct = val <= 0 ? 0 : 10 + 90 * (val / max);
         const bg = val <= 0 ? 'color-mix(in srgb, var(--text-muted) 10%, var(--surface-1))' : `color-mix(in srgb, ${colorVar(m)} ${pct.toFixed(0)}%, var(--surface-1))`;
-        const lbl = `${days[r]} ${c * 2}h–${c * 2 + 2}h : ${vol(val)} en moyenne${isNow ? ' — vous êtes ici (maintenant)' : ''}`;
+        const lbl = `${days[r]} ${c * 2}h–${c * 2 + 2}h : ${vol(val)} en moyenne${isNow ? ' — dernière tranche mesurée' : ''}`;
         html += `<div class="c${isNow ? ' now' : ''}" data-tip="${esc(lbl)}" style="background:${bg}" role="presentation">${isNow ? `<span class="nt"><b>${tag[0]}</b><span class="t"> ${esc(tag[1])}</span></span>` : ''}</div>`;
       });
     });
@@ -412,7 +399,7 @@
     $('#heat-scale').innerHTML = `0 <span class="bar" style="background:linear-gradient(90deg,color-mix(in srgb,var(--text-muted) 10%,var(--surface-1)),color-mix(in srgb,${colorVar(m)} 10%,var(--surface-1)),${colorVar(m)})"></span> ${vol(max)} par tranche de 2 h`;
 
     // texte de tendance : dernière tranche mesurée comparée à la même tranche, le même jour de la semaine, les semaines précédentes
-    let txt = `<strong>Maintenant</strong> : ${dayNames[nowRow]}, ${nowCol * 2} h–${nowCol * 2 + 2} h (case entourée). `;
+    let txt = `<strong>Dernière mesure</strong> : ${dayNames[nowRow]}, ${nowCol * 2} h–${nowCol * 2 + 2} h (case entourée). `;
     if (!tr) txt += 'Pas encore assez de relevés récents pour comparer.';
     else {
       const win = `${fmtHm(tr.t0)} → ${fmtHm(tr.t1)}`, dn = dayNames[(new Date(tr.t1).getDay() + 6) % 7];
@@ -469,6 +456,12 @@
         <p class="small">Vous pouvez aussi garder une copie chez vous : le fichier CSV contient la variable, l'heure (UTC), la valeur en litres et l'origine (auto ou manuel).</p>
         <div><a class="btn" href="api/export.csv" download>Télécharger tous les relevés (CSV)</a></div>
         <p class="hint">Se réimporte avec <code>scripts/import.mjs</code> (voir le README). La restauration redonne les mêmes relevés, origine comprise.</p></fieldset>` : ''}
+      ${mode === 'server' ? `<fieldset><legend>Alertes par mail</legend>
+        <p class="small">Le site recalcule les alertes toutes les heures. Les alertes <strong>critiques et importantes</strong> sont envoyées par mail au <strong>bureau</strong> (comptes « bureau » de l'ASL), via la messagerie Gmail de l'ASL : un mail à l'apparition, un rappel toutes les 24 h tant que l'alerte dure (3 au plus), un mail au rétablissement. Les alertes « attention » restent visibles sur la page seulement.</p>
+        <label class="check"><input type="checkbox" id="am-enabled"> Envoyer les alertes par mail au bureau</label>
+        <div id="am-box" class="small">Chargement…</div>
+        <div class="row-btns"><button class="btn" type="button" id="btn-am-test">Envoyer un mail de test</button> <button class="btn" type="button" id="btn-am-check">Contrôler maintenant</button></div>
+        <p class="hint">Les mails partent de la file d'attente de l'ASL : le script Gmail les envoie dans les 10 minutes.</p></fieldset>` : ''}
       ${meterFs}
       <div class="dlg-actions">
         <button class="btn" type="button" id="btn-reset">Valeurs par défaut</button>
@@ -555,6 +548,46 @@
     } catch (e) { box.textContent = 'Lecture impossible : ' + e.message; }
   }
 
+  /* ---------- Alertes par mail (réglages) ---------- */
+
+  async function loadAlertsMailBox() {
+    const box = $('#am-box'); if (!box) return;
+    try {
+      const st = await apiGet('alerts-mail', {});
+      const d = (ms) => fmtFull(ms);
+      $('#am-enabled').checked = !!st.enabled;
+      let html = '';
+      if (!st.enabled) html += '<p class="muted">Envoi par mail désactivé : les alertes ne sont affichées que sur la page.</p>';
+      if (st.last) html += st.last.ok
+        ? `<p>✓ Dernier contrôle : ${esc(d(st.last.at))} — ${st.last.active} alerte${st.last.active > 1 ? 's' : ''} critique${st.last.active > 1 ? 's' : ''} ou importante${st.last.active > 1 ? 's' : ''} en cours.</p>`
+        : `<p class="rd-msg err">✗ Dernier contrôle en échec (${esc(d(st.last.at))}) : ${esc(st.last.error)}. Nouvel essai dans l'heure.</p>`;
+      else html += '<p class="muted">Aucun contrôle pour l\'instant : le premier a lieu dans l\'heure.</p>';
+      if (st.last && st.last.lastMail) html += `<p class="small">Dernier mail déposé : ${esc(d(st.last.lastMail.at))} — « ${esc(st.last.lastMail.subject)} » (${st.last.lastMail.recipients} destinataire${st.last.lastMail.recipients > 1 ? 's' : ''}).</p>`;
+      if (st.tracked.length) html += '<p class="small">Alertes signalées et encore suivies : ' + st.tracked.map((a) => `${esc(a.meter)} (${a.level === 'critical' ? 'critique' : 'importante'}, depuis ${esc(d(a.first_at))})`).join(' ; ') + '.</p>';
+      box.innerHTML = html;
+    } catch (e) { box.textContent = 'Lecture impossible : ' + e.message; }
+    $('#am-enabled').onchange = async (ev) => {
+      try { await apiSend('PUT', 'alerts-mail', { enabled: ev.target.checked }); } catch (e) { window.alert('Enregistrement impossible : ' + e.message); ev.target.checked = !ev.target.checked; }
+      loadAlertsMailBox();
+    };
+    $('#btn-am-test').onclick = async (ev) => {
+      const b = ev.target; b.disabled = true; b.textContent = 'Envoi…';
+      try {
+        const r = (await apiSend('POST', 'alerts-mail/test', {})).result;
+        window.alert(r.ok ? `Mail de test déposé dans la file de l'ASL pour ${r.recipients} destinataire${r.recipients > 1 ? 's' : ''} (le bureau). Il part dans les 10 minutes.` : 'Mail de test impossible : ' + r.error);
+      } catch (e) { window.alert('Mail de test impossible : ' + e.message); }
+      b.disabled = false; b.textContent = 'Envoyer un mail de test';
+    };
+    $('#btn-am-check').onclick = async (ev) => {
+      const b = ev.target; b.disabled = true; b.textContent = 'Contrôle…';
+      try {
+        const r = (await apiSend('POST', 'alerts-mail/check', {})).result;
+        window.alert(!r.ok ? 'Contrôle en échec : ' + r.error : !r.enabled ? 'Envoi par mail désactivé : rien n\'a été envoyé.' : r.sent ? `Mail déposé pour ${r.recipients} destinataire${r.recipients > 1 ? 's' : ''} : « ${r.subject} ».` : `Contrôle terminé : ${r.active} alerte${r.active > 1 ? 's' : ''} en cours, aucun nouveau mail à envoyer.`);
+      } catch (e) { window.alert('Contrôle impossible : ' + e.message); }
+      loadAlertsMailBox();
+    };
+  }
+
   async function backupNow() {
     const b = $('#btn-backup-now'); b.disabled = true; b.textContent = 'Sauvegarde…';
     try { const r = (await apiSend('POST', 'backup', {})).result; if (!r.ok) window.alert('Sauvegarde en échec : ' + r.error); }
@@ -587,7 +620,7 @@
     const dlg = $('#settings');
     dlg.innerHTML = settingsHtml();
     $('#btn-detect').onclick = detectVariables;
-    if (mode === 'server') { loadKeyBox(); loadBackupBox(); }
+    if (mode === 'server') { loadKeyBox(); loadBackupBox(); loadAlertsMailBox(); }
     $('#btn-cancel').onclick = () => dlg.close();
     const persist = async () => { try { await saveCfg(); } catch (e) { window.alert('Enregistrement impossible : ' + e.message); } start(); };
     $('#btn-reset').onclick = () => { cfg = JSON.parse(JSON.stringify(DEFAULT_CFG)); dlg.close(); persist(); };

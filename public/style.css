@@ -270,3 +270,8 @@ code { background: var(--bg); border-radius: 4px; padding: .05rem .3rem; font-si
   .top-user { justify-content: space-between; }
 }
 @media print { .top-actions, .theme-btn { display: none; } }
+
+/* Réglages : alertes par mail */
+.check { display: flex; align-items: center; gap: .5rem; margin: .4rem 0; font-weight: 600; }
+.check input { width: auto; min-height: 0; }
+.row-btns { display: flex; flex-wrap: wrap; gap: .5rem; margin: .5rem 0; }

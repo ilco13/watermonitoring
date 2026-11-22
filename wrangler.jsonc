@@ -5,9 +5,10 @@
   "build": { "command": "node scripts/build-assets.mjs", "watch_dir": "public" },
   "workers_dev": true,
   "preview_urls": false,
-  "vars": { "ASL_URL": "https://asl.pierrotcolombine.workers.dev", "ASL_NAME": "Pierrot et Colombine" },
+  "vars": { "ASL_URL": "https://asl.pierrotcolombine.workers.dev", "ASL_NAME": "Pierrot et Colombine", "SITE_URL": "https://eau.pierrotcolombine.workers.dev" },
+  "services": [{ "binding": "ASL", "service": "asl" }],
   "r2_buckets": [{ "binding": "BACKUPS", "bucket_name": "eau-sauvegardes" }],
-  "triggers": { "crons": ["17 3 * * 1"] },
+  "triggers": { "crons": ["17 3 * * 1", "10 * * * *"] },
   "d1_databases": [
     {
       "binding": "DB",

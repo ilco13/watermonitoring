@@ -22,8 +22,13 @@
  * Sans l'un de ces secrets, la partie concernée répond 503 : jamais ouverte par oubli.
  */
 import { parseIngest } from './ingest.js';
+import '../public/lib.js'; // calculs communs avec le navigateur : script UMD qui, dans un Worker, se range dans self.WM
+import { alertStatus, bindLib, previewAlerts, runAlertCheck, sendTestMail, setMailEnabled } from './alerting.js';
+
 import { SESSION_COOKIE, clearSessionCookie, getCookie, makeSession, safeNext, sessionCookie, sign, verify } from './auth.js';
 import ASSETS from './assets.js'; // généré depuis public/ par scripts/build-assets.mjs
+
+bindLib(globalThis.WM);
 
 const MAX_BODY = 1_000_000;   // octets
 const KEEP_EVENTS = 200;
@@ -275,6 +280,7 @@ async function backupStatus(env) {
   return out;
 }
 
+const BACKUP_CRON = '17 3 * * 1';
 const FORBIDDEN = () => json({ status: false, message: 'Réservé au bureau' }, 403);
 
 /**
@@ -317,6 +323,26 @@ async function handleApi(request, url, env, session) {
       return json({ status: true, result: await runBackup(env, 'manuel', session) });
     }
     if (request.method === 'GET') return json({ status: true, result: await backupStatus(env) });
+  }
+  if (p === '/api/alerts-mail' || p.startsWith('/api/alerts-mail/')) {
+    if (!admin) return FORBIDDEN();
+    const by = String(session.email || session.name || session.sub).slice(0, 120);
+    if (request.method === 'GET' && p === '/api/alerts-mail') return json({ status: true, result: await alertStatus(env) });
+    if (request.method === 'GET' && p === '/api/alerts-mail/preview') return json({ status: true, result: await previewAlerts(env) });
+    if (request.method === 'PUT' && p === '/api/alerts-mail') {
+      if (!writeAllowed(request, url)) return json({ status: false, message: 'Requête refusée' }, 403);
+      let body; try { body = await request.json(); } catch { return json({ status: false, message: 'JSON invalide' }, 400); }
+      await setMailEnabled(env, !!(body && body.enabled), by);
+      return json({ status: true, result: await alertStatus(env) });
+    }
+    if (request.method === 'POST' && (p === '/api/alerts-mail/test' || p === '/api/alerts-mail/check')) {
+      if (!writeAllowed(request, url)) return json({ status: false, message: 'Requête refusée' }, 403);
+      if (p.endsWith('/test')) {
+        try { return json({ status: true, result: { ok: true, recipients: await sendTestMail(env, by) } }); }
+        catch (e) { return json({ status: true, result: { ok: false, error: String((e && e.message) || e).slice(0, 240) } }); }
+      }
+      return json({ status: true, result: await runAlertCheck(env) });
+    }
   }
   if (p === '/api/ingest-key') {
     if (!admin) return FORBIDDEN();
@@ -430,9 +456,9 @@ async function handleSsoCallback(request, url, env) {
 }
 
 export default {
-  // Cron hebdomadaire (wrangler.jsonc) : sauvegarde des relevés dans R2
+  // Déclencheurs (wrangler.jsonc) : sauvegarde hebdomadaire des relevés dans R2 (lundi 3 h 17 UTC), contrôle des alertes toutes les heures
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(runBackup(env, 'hebdo', null));
+    ctx.waitUntil(event.cron === BACKUP_CRON ? runBackup(env, 'hebdo', null) : runAlertCheck(env));
   },
 
   async fetch(request, env) {

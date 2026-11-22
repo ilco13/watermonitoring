@@ -394,7 +394,29 @@
   }
   const fmtTime = (ms) => new Date(ms).toLocaleString('fr-FR', { weekday: 'short', hour: '2-digit', minute: '2-digit' });
 
+  /* ---------- Réglages par défaut (communs au navigateur et au Worker) ---------- */
+
+  const DEFAULT_CFG = {
+    historyYears: 3,
+    refreshMin: 10,
+    // index_eau_1 = voie 0 (genericSensor "0") = eau potable ; index_eau_2 = voie 1 = arrosage ; index en litres
+    meters: [
+      { id: 'potable', name: 'Eau potable', variable: 'index_eau_1', litresPerUnit: 1, slot: 1,
+        alerts: { dailyLimitL: 4000, monthlyLimitL: 0, maxFlowLph: 1500, leakHours: 0, quietFromH: 0, quietToH: 0, quietMaxL: 0, baseFlowRatio: 2, baseFlowMinLph: 20, spikeRatio: 2.5, staleHours: 6 } },
+      { id: 'arrosage', name: 'Arrosage', variable: 'index_eau_2', litresPerUnit: 1, slot: 2,
+        alerts: { dailyLimitL: 3000, monthlyLimitL: 0, maxFlowLph: 1500, leakHours: 12, quietFromH: 6, quietToH: 18, quietMaxL: 10, baseFlowRatio: 0, baseFlowMinLph: 0, spikeRatio: 0, staleHours: 6 } },
+    ],
+  };
+
+  function mergeCfg(saved) {
+    if (!saved || typeof saved !== 'object') return JSON.parse(JSON.stringify(DEFAULT_CFG));
+    return Object.assign({}, DEFAULT_CFG, saved, {
+      meters: DEFAULT_CFG.meters.map((m, i) => Object.assign({}, m, (saved.meters || [])[i], { alerts: Object.assign({}, m.alerts, ((saved.meters || [])[i] || {}).alerts) })),
+    });
+  }
+
   return {
+    DEFAULT_CFG, mergeCfg,
     H, DAY, toReadings, toIntervals, bucketize, estimatedShare, total,
     startOfDay, addDays, startOfMonth, addMonths, startOfYear, addYears, startOfWeek,
     edgesBack, edgesHours, edgesCalendar, edgesRolling, nextExpected, trendVsUsual, summarize, evaluateAlerts, weeklyProfile, median,
