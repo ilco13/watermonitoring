@@ -70,7 +70,7 @@ export function parseExport(text, filename = '', range = {}) {
     if (!r || typeof r !== 'object') { skipped++; continue; }
     let item = r;
     if (isCsv) {
-      if ('variable' in r && 'value' in r) item = { variable: r.variable, value: r.value, time: r.time };            // TagoIO
+      if ('variable' in r && 'value' in r) item = { variable: r.variable, value: r.value, time: r.time, ...(r.source ? { source: r.source } : {}) };   // TagoIO ou sauvegarde de ce site
       else if ('value' in r) item = { value: r.value, timestamp: r.timestamp || r.created || r.time, streamId: r.streamid };  // Live Objects
       else { skipped++; continue; }
     }

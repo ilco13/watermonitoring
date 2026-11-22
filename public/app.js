@@ -77,8 +77,14 @@
     return (body && body.result) || [];
   }
 
-  async function fetchVariable(variable) {
-    const start = new Date(); start.setFullYear(start.getFullYear() - cfg.historyYears); start.setMonth(0, 1); start.setHours(0, 0, 0, 0);
+  /**
+   * Relevés d'une variable. Sans `sinceMs` : tout l'historique configuré. Avec `sinceMs` : seulement ce qui est plus récent
+   * (actualisation incrémentale : le plafond de lectures de la base gratuite se compte en lignes lues).
+   */
+  async function fetchVariable(variable, sinceMs) {
+    let start;
+    if (sinceMs) start = new Date(sinceMs);
+    else { start = new Date(); start.setFullYear(start.getFullYear() - cfg.historyYears); start.setMonth(0, 1); start.setHours(0, 0, 0, 0); }
     const qty = 10000, rows = [];
     for (let skip = 0; ; skip += qty) {
       const page = await apiGet('data', { variable, qty, skip, start_date: start.toISOString(), ordination: 'descending' });
@@ -88,17 +94,38 @@
     return rows;
   }
 
-  async function loadAll() {
+  const FULL_RELOAD_MS = 24 * 3600e3;    // rechargement complet au moins une fois par jour (corrections faites ailleurs)
+  const OVERLAP_MS = 24 * 3600e3;        // en incrémental, on redemande les 24 dernières heures : rattrape un message arrivé en retard
+  state.rows = {};                       // compteur -> { key, map: heure ISO -> ligne, fullAt }
+
+  /** full = true : tout recharger (modification manuelle, bouton Actualiser, changement de réglages). */
+  async function loadAll(full) {
     state.errors = [];
     const demo = mode === 'demo' ? DEMO.generate(Date.now(), cfg.historyYears) : null;
     await Promise.all(cfg.meters.map(async (m) => {
       try {
-        const rows = demo ? demo[m.id] : await fetchVariable(m.variable);
+        let rows;
+        if (demo) rows = demo[m.id];
+        else {
+          const key = `${m.variable}|${cfg.historyYears}`;
+          const have = state.rows[m.id];
+          const incremental = !full && have && have.key === key && Date.now() - have.fullAt < FULL_RELOAD_MS && have.map.size > 0;
+          if (incremental) {
+            const last = Math.max(...[...have.map.keys()].map((t) => Date.parse(t)));
+            for (const r of await fetchVariable(m.variable, last - OVERLAP_MS)) have.map.set(r.time, r);
+          } else {
+            const map = new Map();
+            for (const r of await fetchVariable(m.variable)) map.set(r.time, r);
+            state.rows[m.id] = { key, map, fullAt: Date.now() };
+          }
+          rows = [...state.rows[m.id].map.values()];
+        }
         if (!rows.length) throw new Error(`aucune donnée pour la variable « ${m.variable} »`);
         const readings = WM.toReadings(rows, m.litresPerUnit);
         state.data[m.id] = { readings, intervals: WM.toIntervals(readings) };
       } catch (e) {
         state.data[m.id] = { readings: [], intervals: [] };
+        delete state.rows[m.id];
         state.errors.push(`${m.name} : ${e.message}`);
       }
     }));
@@ -436,6 +463,10 @@
         <div id="detect-out" hidden></div><datalist id="vars"></datalist>
       </fieldset>
       ${mode === 'server' ? '<fieldset><legend>Clé de réception Live Objects</legend><div id="key-box" class="small">Chargement…</div></fieldset>' : ''}
+      ${mode === 'server' ? `<fieldset><legend>Sauvegarde des relevés</legend>
+        <p class="small">Tous les relevés sont conservés sans limite de durée. Gardez aussi une copie chez vous : le fichier CSV contient la variable, l'heure (UTC), la valeur en litres et l'origine (auto ou manuel).</p>
+        <div><a class="btn" href="api/export.csv" download>Télécharger tous les relevés (CSV)</a></div>
+        <p class="hint">Se réimporte avec <code>scripts/import.mjs</code> (voir le README). La restauration redonne les mêmes relevés, origine comprise.</p></fieldset>` : ''}
       ${meterFs}
       <div class="dlg-actions">
         <button class="btn" type="button" id="btn-reset">Valeurs par défaut</button>
@@ -613,7 +644,7 @@
 
   async function afterWrite() {
     const msg = rd.msg, err = rd.err;
-    await loadAll(); renderAll(); renderRdForm(); setRdMsg(msg, err); await loadRdList(false);
+    await loadAll(true); renderAll(); renderRdForm(); setRdMsg(msg, err); await loadRdList(false);
   }
 
   async function loadRdList(append) {
@@ -740,7 +771,7 @@
   async function start() {
     clearInterval(timer);
     mode = await detectMode();
-    state.me = null;
+    state.me = null; state.rows = {};      // (re)démarrage : chargement complet
     if (mode === 'server') {
       try {
         const [me, conf] = await Promise.all([apiGet('me', {}), apiGet('config', {})]);
@@ -758,7 +789,7 @@
     let theme = 'light'; try { theme = localStorage.getItem('wm.theme') || 'light'; } catch (e) { /* ignore */ }
     applyTheme(theme);
     $('#btn-theme').onclick = () => { applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'); renderView(); };
-    $('#btn-refresh').onclick = async () => { $('#status').textContent = 'Actualisation…'; await loadAll(); renderAll(); };
+    $('#btn-refresh').onclick = async () => { $('#status').textContent = 'Actualisation…'; await loadAll(true); renderAll(); };
     $('#btn-logout').onclick = async () => {
       try { location.href = (await apiSend('POST', 'logout', {})).result.url; }   // ferme la session ici puis celle de l'ASL
       catch (e) { window.alert('Déconnexion impossible : ' + e.message); }

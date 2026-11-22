@@ -123,6 +123,13 @@ Le script lit les messages Live Objects (JSON, lignes JSON ou CSV) comme les exp
 
 Dans Cloudflare : Workers & Pages → Create → Import a repository → ce dépôt. Commande de déploiement : `npx wrangler deploy`. Les secrets se définissent dans Settings → Variables and Secrets du Worker.
 
+## Conservation et sauvegardes
+
+- **Les relevés sont conservés sans limite de durée** : le site ne supprime jamais un relevé (seule la copie brute des 200 derniers messages reçus est purgée). La base D1 gratuite accepte 500 Mo ; ce site en consomme environ 0,5 Mo par an.
+- **Quota de lectures** : le plan gratuit limite à 5 millions de lignes lues par jour, et les requêtes échouent une fois le plafond atteint (jusqu'à minuit UTC ; les données ne sont pas touchées). Après un premier chargement complet, le tableau de bord ne redemande donc que les dernières 24 h à chaque actualisation, et refait un chargement complet toutes les 24 h, après chaque modification manuelle et au clic sur ↻.
+- **Retour en arrière** : « Time Travel » de Cloudflare permet de restaurer la base à un instant précis, mais seulement sur **7 jours avec le plan gratuit** (30 jours avec le plan payant) : `npx wrangler d1 time-travel restore eau --timestamp=2026-11-22T12:00:00Z`.
+- **Copie hors Cloudflare** : *Réglages → Sauvegarde des relevés → Télécharger tous les relevés (CSV)* (bureau). Le fichier (`variable,time,value,source`) se réimporte avec `node scripts/import.mjs releves-eau-AAAA-MM-JJ.csv https://eau.<votre-sous-domaine>.workers.dev <clé>` : la restauration redonne les mêmes relevés, origine auto ou manuelle comprise. À faire de temps en temps, par exemple tous les trimestres.
+
 ## Sans Cloudflare : aperçu seul
 
 Servez le dossier `public/` avec n'importe quel hébergement statique (`python3 -m http.server -d public`) : la page affiche des **données de démonstration**. Ajoutez `?demo` à l'adresse pour forcer la démonstration même avec le Worker.

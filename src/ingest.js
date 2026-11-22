@@ -84,10 +84,10 @@ export function parseIngest(body, now = Date.now()) {
   const points = [];
   let ignored = 0;
 
-  const add = (variable, rawValue, rawTime) => {
+  const add = (variable, rawValue, rawTime, source) => {
     const value = parseNumber(rawValue);
     if (value === null || !variable) { ignored++; return; }
-    points.push({ variable: String(variable).slice(0, 80), ts: parseTime(rawTime, now), value });
+    points.push({ variable: String(variable).slice(0, 80), ts: parseTime(rawTime, now), value, source: source === 'manual' ? 'manual' : 'auto' });
   };
 
   for (const it of items) {
@@ -106,7 +106,7 @@ export function parseIngest(body, now = Date.now()) {
       continue;
     }
     if (typeof it.variable === 'string' && 'value' in it) {          // 1. format TagoIO
-      add(it.variable, it.value, firstTime(it));
+      add(it.variable, it.value, firstTime(it), it.source);   // « source: manual » : relevé saisi à la main (sauvegarde restaurée)
     } else if (it.value && typeof it.value === 'object' && !Array.isArray(it.value)) { // 2. Live Objects
       const t = firstTime(it);
       for (const [name, v] of flatten(it.value, '', [], 0)) add(name, v, t);

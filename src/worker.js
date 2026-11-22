@@ -11,6 +11,7 @@
  *   PUT  /api/config                                            réglages communs        (bureau)
  *   GET  /api/variables, /api/events                            diagnostic              (bureau)
  *   GET/POST/DELETE /api/readings                               liste, ajout, correction, suppression d'un relevé (bureau)
+ *   GET  /api/export.csv                                        tous les relevés en CSV, pour une copie hors Cloudflare (bureau)
  *   GET/POST /api/ingest-key                                    état / régénération de la clé Live Objects (bureau)
  *   POST /api/logout                                            ferme la session ici et renvoie l'adresse qui ferme aussi celle de l'ASL
  *   tout le reste       fichiers de public/ (intégrés au Worker)
@@ -89,7 +90,7 @@ async function handleIngest(request, url, env) {
   const { points, ignored } = body === null ? { points: [], ignored: 0 } : parseIngest(body);
 
   const stmts = points.map((p) =>
-    env.DB.prepare('INSERT OR IGNORE INTO readings (variable, ts, value) VALUES (?, ?, ?)').bind(p.variable, p.ts, p.value));
+    env.DB.prepare('INSERT OR IGNORE INTO readings (variable, ts, value, source) VALUES (?, ?, ?, ?)').bind(p.variable, p.ts, p.value, p.source));
   let stored = 0;
   for (let i = 0; i < stmts.length; i += 50) {
     const res = await env.DB.batch(stmts.slice(i, i + 50));
@@ -287,8 +288,19 @@ async function handleApi(request, url, env, session) {
     return json({ status: true, result: results.map((r) => ({ variable, value: r.value, time: new Date(r.ts).toISOString(), source: r.source })) });
   }
 
-  if (p === '/api/variables' || p === '/api/events') {
+  if (p === '/api/variables' || p === '/api/events' || p === '/api/export.csv') {
     if (!admin) return FORBIDDEN();
+  }
+
+  if (p === '/api/export.csv') {
+    // Sauvegarde complète : variable, heure UTC (ISO), valeur brute (litres), origine. Se réimporte avec scripts/import.mjs.
+    const { results } = await env.DB.prepare('SELECT variable, ts, value, source FROM readings ORDER BY variable, ts').all();
+    const cell = (x) => (/[",\n\r]/.test(String(x)) ? `"${String(x).replace(/"/g, '""')}"` : String(x));
+    const lines = ['variable,time,value,source', ...results.map((r) => [r.variable, new Date(r.ts).toISOString(), r.value, r.source].map(cell).join(','))];
+    return new Response(lines.join('\n') + '\n', { headers: {
+      'content-type': 'text/csv; charset=utf-8', 'cache-control': 'no-store',
+      'content-disposition': `attachment; filename="releves-eau-${new Date().toISOString().slice(0, 10)}.csv"`,
+    } });
   }
 
   if (p === '/api/variables') {
