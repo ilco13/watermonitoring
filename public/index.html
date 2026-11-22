@@ -10,6 +10,10 @@
 <body>
 <header class="top">
   <a class="brand" href="{{ASL_URL}}/"><img class="brand-logo" src="{{ASL_URL}}/icone.png" alt="" width="36" height="36">{{ASL_NAME}}</a>
+  <input type="checkbox" id="navtoggle" class="navtoggle" aria-label="Afficher le menu">
+  <label for="navtoggle" class="burger" aria-hidden="true">
+    <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" focusable="false"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/></svg>
+  </label>
   <nav aria-label="Navigation">
     <a href="{{ASL_URL}}/" title="Retour à l'ASL" aria-label="Retour à l'ASL">← ASL</a>
     <a data-view-link="synthese" href="#synthese">Synthèse</a>

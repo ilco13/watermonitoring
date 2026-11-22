@@ -778,6 +778,9 @@
     });
     $('#as-table').onchange = (e) => { state.asTable = e.target.checked; renderChart(); };
     setupTip();
+    const navToggle = $('#navtoggle');
+    $('header.top').addEventListener('click', (e) => { if (navToggle && e.target.closest('nav a, .top-actions button')) navToggle.checked = false; });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && navToggle) navToggle.checked = false; });
     window.addEventListener('hashchange', showView);
     showView();
     setInterval(() => { if (state.loadedAt) renderStatus(); }, 30000);
