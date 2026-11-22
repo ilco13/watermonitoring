@@ -51,7 +51,7 @@ export function evaluate(cfg, readingsByVariable, now) {
     const rows = (readingsByVariable[m.variable] || []).map((r) => ({ time: toParis(r.ts), value: r.value }));
     const readings = WM.toReadings(rows, m.litresPerUnit);
     const intervals = WM.toIntervals(readings);
-    for (const a of WM.evaluateAlerts(m.alerts, readings, intervals, shiftedNow)) {
+    for (const a of WM.evaluateMeter(m, cfg.site, readings, intervals, shiftedNow)) {
       if (MAIL_LEVELS.has(a.level)) out.push({ key: alertKey(m.variable, a.code), level: a.level, code: a.code, meter: m.name, text: a.text });
     }
   }

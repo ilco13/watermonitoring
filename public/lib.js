@@ -258,6 +258,97 @@
 
   /* ---------- Alertes ---------- */
 
+  /* ---------- Alertes qui s'adaptent aux besoins (habitants, nouvelles maisons) ---------- */
+
+  const DAY_KEY = /^\d{4}-\d{2}-\d{2}$/;
+  const pad2 = (n) => String(n).padStart(2, '0');
+  const dayKey = (ms) => { const d = new Date(ms); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; };
+  const keyToMs = (k) => { const [y, m, d] = k.split('-').map(Number); return new Date(y, m - 1, d).getTime(); };
+  const REF_DAYS = 28;          // les 28 derniers jours « normaux » servent de référence
+  const REF_MIN = 7;            // il en faut au moins 7 pour juger
+  const FLOOR_EXP = 0.5;        // le débit de fond (la nuit) augmente moins vite que le nombre d'habitants : racine carrée
+
+  /** Habitants à une date (ms) : dernier changement annoncé avant cette date (le premier si la date est plus ancienne). */
+  function peopleAt(site, ms) {
+    const list = ((site && site.people) || []).filter((x) => x && DAY_KEY.test(x.from) && x.n > 0).sort((a, b) => (a.from < b.from ? -1 : 1));
+    if (!list.length) return 1;
+    const k = dayKey(ms);
+    let n = list[0].n;
+    for (const x of list) if (x.from <= k) n = x.n;
+    return n;
+  }
+  const inEvent = (site, k) => ((site && site.events) || []).some((e) => e && DAY_KEY.test(e.from) && DAY_KEY.test(e.to) && e.from <= k && k <= e.to);
+
+  /** Jours complets avant `ref` (le plus ancien d'abord) : volume, débit minimal, validité (relevés assez rapprochés). */
+  function dailySeries(readings, intervals, ref, n) {
+    const out = [];
+    if (!readings.length) return out;
+    const today = startOfDay(ref), first = readings[0].t;
+    for (let i = n; i >= 1; i--) {
+      const a = addDays(today, -i), b = addDays(today, -i + 1);
+      const ivs = intervals.filter((iv) => iv.t1 > a && iv.t0 < b);
+      const inDay = ivs.filter((iv) => iv.t1 <= b && iv.t1 - iv.t0 >= MIN_FLOW_SPAN && !iv.reset);
+      const valid = first <= a + 3 * H && ivs.length >= 8 && !ivs.some((iv) => iv.reset || iv.t1 - iv.t0 > 3 * H) && inDay.length >= 8;
+      out.push({
+        key: dayKey(a), a, valid,
+        v: valid ? total(intervals, a, b) : null,
+        f: valid ? Math.min(...inDay.map((iv) => iv.d / ((iv.t1 - iv.t0) / H))) : null,
+      });
+    }
+    return out;
+  }
+
+  /** Niveau « normal » pour des habitants donnés, d'après les jours acceptés (volume et débit de fond ramenés à ces habitants). */
+  function referenceFor(accepted, people, atMs) {
+    // les 28 derniers jours normaux, aussi anciens soient-ils : tant qu'une anomalie dure, la référence reste celle d'avant
+    const used = accepted.filter((d) => d.a < atMs).slice(-REF_DAYS);
+    if (used.length < REF_MIN) return null;
+    return {
+      n: used.length,
+      v: median(used.map((d) => d.v * (people / d.P))),
+      f: median(used.map((d) => d.f * Math.pow(people / d.P, FLOOR_EXP))),
+    };
+  }
+
+  /**
+   * Seuils qui suivent les besoins. On range chaque jour passé : « normal » (il entre dans la référence) ou « anormal » (il n'y entre pas,
+   * donc une fuite ou un gros écart ne devient pas la nouvelle normalité), « exclu » (événement annoncé, relevés manquants, avant la
+   * remise à zéro). Les habitants annoncés (site.people) ramènent tout à un même niveau : une maison de plus n'est pas une fuite.
+   * Une hausse lente (emménagements progressifs) est suivie par la référence (médiane des 28 derniers jours normaux).
+   *   m.alerts.spikeRatio   : un jour est anormal au-delà de ce multiple du volume normal (0 = règle désactivée)
+   *   m.alerts.baseFlowRatio / baseFlowMinLph : débit de fond anormal (comme avant, mais par rapport au niveau appris)
+   *   m.since (AAAA-MM-JJ)  : « c'est le nouveau normal » : on n'apprend qu'à partir de ce jour
+   */
+  function adaptiveAssess(m, site, readings, intervals, now) {
+    const a = m.alerts || {};
+    const info = { on: true, ready: false, people: 1, ref: null, vMax: null, fMax: null, learned: 0, event: false, since: m.since || '', days: [] };
+    if (!readings.length) return info;
+    const lastT = readings[readings.length - 1].t, ref = Math.min(now, lastT);
+    const sinceMs = m.since && DAY_KEY.test(m.since) ? keyToMs(m.since) : 0;
+    const series = dailySeries(readings, intervals, ref, 200);
+    const accepted = [];
+    const limits = (r, P) => ({
+      vMax: a.spikeRatio > 0 ? a.spikeRatio * r.v : Infinity,
+      fMax: a.baseFlowRatio > 0 ? Math.max(a.baseFlowRatio * r.f, r.f + (a.baseFlowMinLph || 0)) : Infinity,
+    });
+    for (const d of series) {
+      d.P = peopleAt(site, d.a);
+      if (!d.valid || inEvent(site, d.key) || d.a < sinceMs) { d.status = 'exclu'; info.days.push(d); continue; }
+      const r = referenceFor(accepted, d.P, d.a);
+      if (!r) { d.status = 'appris'; accepted.push(d); info.days.push(d); continue; }   // début d'apprentissage : tout est retenu
+      const lim = limits(r, d.P);
+      d.status = d.v > lim.vMax || (d.f != null && d.f > lim.fMax) ? 'anormal' : 'normal';
+      if (d.status === 'normal') accepted.push(d);
+      info.days.push(d);
+    }
+    info.people = peopleAt(site, ref);
+    info.event = inEvent(site, dayKey(ref));
+    info.learned = Math.min(REF_DAYS, accepted.length);
+    const r = referenceFor(accepted, info.people, ref);
+    if (r) { info.ready = true; info.ref = r; Object.assign(info, limits(r, info.people)); }
+    return info;
+  }
+
   const LEVEL_RANK = { critical: 3, serious: 2, warning: 1 };
 
   /**
@@ -270,7 +361,7 @@
    *    ratio × sa valeur habituelle (médiane des minima des 14 jours précédents) ET d'au moins baseFlowMinLph L/h
    *    de plus. Adapté à un compteur qui ne s'arrête jamais vraiment (réseau d'une ASL).
    */
-  function evaluateAlerts(cfg, readings, intervals, now) {
+  function evaluateAlerts(cfg, readings, intervals, now, adaptive) {
     const out = [];
     if (!readings.length) {
       out.push({ level: 'critical', code: 'nodata', text: 'Aucun relevé reçu.' });
@@ -286,8 +377,9 @@
       out.push({ level: 'warning', code: 'reset', text: 'Index en recul sur les 7 derniers jours (remplacement ou remise à zéro du compteur ?). Ces intervalles sont ignorés.' });
     }
     if (cfg.dailyLimitL > 0) {
-      if (sum.today > cfg.dailyLimitL) out.push({ level: 'critical', code: 'daily', text: `Consommation du jour au-dessus du seuil : ${fmtVolume(sum.today)} pour ${fmtVolume(cfg.dailyLimitL)} autorisés.` });
-      else if (sum.today > 0.8 * cfg.dailyLimitL) out.push({ level: 'warning', code: 'daily80', text: `Consommation du jour à ${Math.round(sum.today / cfg.dailyLimitL * 100)} % du seuil (${fmtVolume(sum.today)} / ${fmtVolume(cfg.dailyLimitL)}).` });
+      // en mode adaptatif ce plafond n'est qu'un garde-fou absolu ; l'alerte « 80 % » disparaît (les seuils suivent les besoins)
+      if (sum.today > cfg.dailyLimitL) out.push({ level: 'critical', code: adaptive ? 'dailycap' : 'daily', text: `Consommation du jour au-dessus du seuil : ${fmtVolume(sum.today)} pour ${fmtVolume(cfg.dailyLimitL)} autorisés.` });
+      else if (!adaptive && sum.today > 0.8 * cfg.dailyLimitL) out.push({ level: 'warning', code: 'daily80', text: `Consommation du jour à ${Math.round(sum.today / cfg.dailyLimitL * 100)} % du seuil (${fmtVolume(sum.today)} / ${fmtVolume(cfg.dailyLimitL)}).` });
     }
     if (cfg.monthlyLimitL > 0 && sum.month > cfg.monthlyLimitL) {
       out.push({ level: 'serious', code: 'monthly', text: `Consommation du mois au-dessus du seuil : ${fmtVolume(sum.month)} pour ${fmtVolume(cfg.monthlyLimitL)}.` });
@@ -329,7 +421,7 @@
         out.push({ level: 'serious', code: 'quiet', text: `Consommation en journée : ${fmtVolume(worst.d)} entre ${hm(worst.t0)} et ${hm(worst.t1)}${hits.length > 1 ? ` (et ${hits.length - 1} autre${hits.length > 2 ? 's' : ''} tranche${hits.length > 2 ? 's' : ''} sur 24 h)` : ''}, alors que ce compteur ne consomme normalement pas entre ${cfg.quietFromH} h et ${cfg.quietToH} h. Fuite ou arrosage hors horaire ?` });
       }
     }
-    if (cfg.baseFlowRatio > 0) {
+    if (!adaptive && cfg.baseFlowRatio > 0) {
       const flowsOf = (a, b) => intervals
         .filter((iv) => iv.t1 > a && iv.t1 <= b && !iv.reset && iv.t1 - iv.t0 >= MIN_FLOW_SPAN)
         .map((iv) => iv.d / ((iv.t1 - iv.t0) / H));
@@ -347,7 +439,7 @@
         }
       }
     }
-    if (cfg.spikeRatio > 0) {
+    if (!adaptive && cfg.spikeRatio > 0) {
       const edges = edgesBack(lastT, 15, 'day');
       const d = bucketize(intervals, edges); // d[14] = aujourd'hui, d[13] = hier
       const ref = median(d.slice(0, 13).filter((x) => x > 0));
@@ -355,8 +447,35 @@
         out.push({ level: 'warning', code: 'spike', text: `Hier : ${fmtVolume(d[13])}, soit ${(d[13] / ref).toFixed(1).replace('.', ',')} × la médiane des jours précédents (${fmtVolume(ref)}).` });
       }
     }
+    if (adaptive && adaptive.ready && !adaptive.event) {
+      const P = adaptive.people, who = `${P} habitant${P > 1 ? 's' : ''}`;
+      const declare = ' Si c\'est attendu (remplissage de piscine, nouveaux habitants…), annoncez-le dans Paramètres.';
+      if (sum.today > adaptive.vMax) {
+        out.push({ level: 'serious', code: 'daily', text: `Consommation du jour inhabituelle : ${fmtVolume(sum.today)} alors que la normale est d'environ ${fmtVolume(adaptive.ref.v)} pour ${who} (alerte au-delà de ${fmtVolume(adaptive.vMax)}).${declare}` });
+      }
+      const cur24 = intervals.filter((iv) => iv.t1 > lastT - DAY && iv.t1 <= lastT && !iv.reset && iv.t1 - iv.t0 >= MIN_FLOW_SPAN).map((iv) => iv.d / ((iv.t1 - iv.t0) / H));
+      if (cur24.length >= 10 && isFinite(adaptive.fMax)) {
+        const cur = Math.min(...cur24);
+        if (cur > adaptive.fMax) {
+          out.push({ level: 'serious', code: 'baseflow', text: `Débit de fond anormal : l'eau ne descend pas sous ${Math.round(cur)} L/h depuis 24 h, alors que la normale est d'environ ${Math.round(adaptive.ref.f)} L/h pour ${who}. Fuite possible.` });
+        }
+      }
+    }
     out.sort((a, b) => LEVEL_RANK[b.level] - LEVEL_RANK[a.level]);
     return out;
+  }
+
+  // Alertes de consommation suspendues pendant un événement annoncé (remplissage de piscine, travaux…) ; l'absence de relevés reste signalée
+  const EVENT_MUTED = new Set(['daily', 'daily80', 'dailycap', 'monthly', 'burst', 'leak', 'quiet', 'baseflow', 'spike']);
+
+  /** Alertes d'un compteur selon sa configuration (règles adaptatives si m.adaptive, événements annoncés) : à utiliser plutôt que evaluateAlerts seul. */
+  function evaluateMeter(m, site, readings, intervals, now) {
+    if (!readings.length) return evaluateAlerts(m.alerts, readings, intervals, now);
+    const ref = Math.min(now, readings[readings.length - 1].t);
+    const event = inEvent(site, dayKey(ref)) || inEvent(site, dayKey(ref - DAY));       // la fenêtre de 24 h de certaines règles déborde sur la veille
+    const adaptive = m.adaptive ? adaptiveAssess(m, site, readings, intervals, now) : null;
+    const alerts = evaluateAlerts(m.alerts, readings, intervals, now, adaptive);
+    return event ? alerts.filter((a) => !EVENT_MUTED.has(a.code)) : alerts;
   }
 
   /* ---------- Profil horaire (jour de semaine × tranche de 2 h) ---------- */
@@ -423,24 +542,37 @@
   const DEFAULT_CFG = {
     historyYears: 3,
     refreshMin: 10,
+    // Situation du lotissement : habitants (changements annoncés, à partir d'une date) et événements exceptionnels (piscine, travaux…)
+    // pendant lesquels les alertes de consommation sont suspendues et rien n'est appris.
+    site: { people: [{ from: '2026-01-01', n: 6 }], events: [] },
     // index_eau_1 = voie 0 (genericSensor "0") = eau potable ; index_eau_2 = voie 1 = arrosage ; index en litres
     meters: [
-      { id: 'potable', name: 'Eau potable', variable: 'index_eau_1', litresPerUnit: 1, slot: 1,
-        alerts: { dailyLimitL: 4000, monthlyLimitL: 0, maxFlowLph: 1500, leakHours: 0, quietFromH: 0, quietToH: 0, quietMaxL: 0, baseFlowRatio: 2, baseFlowMinLph: 20, spikeRatio: 2.5, staleHours: 6 } },
-      { id: 'arrosage', name: 'Arrosage', variable: 'index_eau_2', litresPerUnit: 1, slot: 2,
+      { id: 'potable', name: 'Eau potable', variable: 'index_eau_1', litresPerUnit: 1, slot: 1, adaptive: true, since: '',
+        alerts: { dailyLimitL: 0, monthlyLimitL: 0, maxFlowLph: 1500, leakHours: 0, quietFromH: 0, quietToH: 0, quietMaxL: 0, baseFlowRatio: 2, baseFlowMinLph: 20, spikeRatio: 2, staleHours: 6 } },
+      { id: 'arrosage', name: 'Arrosage', variable: 'index_eau_2', litresPerUnit: 1, slot: 2, adaptive: false, since: '',
         alerts: { dailyLimitL: 3000, monthlyLimitL: 0, maxFlowLph: 1500, leakHours: 12, quietFromH: 6, quietToH: 18, quietMaxL: 10, baseFlowRatio: 0, baseFlowMinLph: 0, spikeRatio: 0, staleHours: 6 } },
     ],
   };
 
   function mergeCfg(saved) {
     if (!saved || typeof saved !== 'object') return JSON.parse(JSON.stringify(DEFAULT_CFG));
+    const site = Object.assign({}, DEFAULT_CFG.site, saved.site && typeof saved.site === 'object' ? saved.site : {});
+    if (!Array.isArray(site.people) || !site.people.length) site.people = JSON.parse(JSON.stringify(DEFAULT_CFG.site.people));
+    if (!Array.isArray(site.events)) site.events = [];
     return Object.assign({}, DEFAULT_CFG, saved, {
-      meters: DEFAULT_CFG.meters.map((m, i) => Object.assign({}, m, (saved.meters || [])[i], { alerts: Object.assign({}, m.alerts, ((saved.meters || [])[i] || {}).alerts) })),
+      site,
+      meters: DEFAULT_CFG.meters.map((m, i) => {
+        const sm = (saved.meters || [])[i] || {};
+        const out = Object.assign({}, m, sm, { alerts: Object.assign({}, m.alerts, sm.alerts) });
+        // réglages enregistrés avant les seuils adaptatifs : l'ancien plafond de 4000 L/jour (valeur par défaut d'alors) est abandonné
+        if (sm.adaptive === undefined && out.adaptive && out.alerts.dailyLimitL === 4000) out.alerts.dailyLimitL = 0;
+        return out;
+      }),
     });
   }
 
   return {
-    DEFAULT_CFG, mergeCfg,
+    DEFAULT_CFG, mergeCfg, evaluateMeter, adaptiveAssess, peopleAt, dayKey,
     H, DAY, toReadings, toIntervals, bucketize, estimatedShare, total,
     startOfDay, addDays, startOfMonth, addMonths, startOfYear, addYears, startOfWeek,
     edgesBack, edgesHours, edgesCalendar, edgesRolling, nextExpected, trendVsUsual, summarize, evaluateAlerts, weeklyProfile, heatOffset, median,

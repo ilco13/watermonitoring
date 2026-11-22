@@ -179,6 +179,7 @@ async function handleReadings(request, url, env) {
 }
 
 const CONFIG_KEY = 'main';
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const NUM = (v, min, max, fallback) => (Number.isFinite(Number(v)) ? Math.min(max, Math.max(min, Number(v))) : fallback);
 
 /** Reconstruit la configuration à partir de champs connus, bornés : rien d'autre n'est conservé. */
@@ -193,9 +194,16 @@ function sanitizeConfig(c) {
       alerts[k] = NUM(a[k], 0, 1e9, 0);
     }
     meters.push({ id: String(m.id), name: String(m.name ?? '').slice(0, 60) || String(m.id), variable: String(m.variable),
-      litresPerUnit: NUM(m.litresPerUnit, 1e-6, 1e6, 1), slot: NUM(m.slot, 1, 8, 1), alerts });
+      litresPerUnit: NUM(m.litresPerUnit, 1e-6, 1e6, 1), slot: NUM(m.slot, 1, 8, 1), adaptive: m.adaptive === true,
+      since: DATE_RE.test(String(m.since)) ? String(m.since) : '', alerts });
   }
-  return { historyYears: NUM(c.historyYears, 1, 10, 3), refreshMin: NUM(c.refreshMin, 1, 1440, 10), meters };
+  // situation du lotissement : habitants (changements annoncés) et événements exceptionnels, bornés
+  const s = c.site && typeof c.site === 'object' ? c.site : {};
+  const people = (Array.isArray(s.people) ? s.people : []).filter((x) => x && DATE_RE.test(String(x.from)) && Number(x.n) >= 1).slice(0, 40)
+    .map((x) => ({ from: String(x.from), n: Math.min(100000, Math.round(Number(x.n))) })).sort((a, b) => (a.from < b.from ? -1 : 1));
+  const events = (Array.isArray(s.events) ? s.events : []).filter((x) => x && DATE_RE.test(String(x.from)) && DATE_RE.test(String(x.to)) && String(x.from) <= String(x.to)).slice(0, 40)
+    .map((x) => ({ label: String(x.label ?? '').slice(0, 60), from: String(x.from), to: String(x.to) }));
+  return { historyYears: NUM(c.historyYears, 1, 10, 3), refreshMin: NUM(c.refreshMin, 1, 1440, 10), site: { people: people.length ? people : [{ from: '2026-01-01', n: 6 }], events }, meters };
 }
 
 /** Nouvelle clé (192 bits) : renvoyée une seule fois, seule son empreinte est conservée. La précédente reste valable 24 h. */

@@ -160,3 +160,14 @@ curl -X POST localhost:8787/ingest -H 'Device-Token: cle' \
 | `scripts/import.mjs` | reprise d'un historique JSON ou CSV |
 
 Les jours, mois et années suivent l'heure locale du navigateur.
+
+
+## Alertes qui suivent les besoins (habitants, nouvelles maisons)
+
+Pour un compteur marqué « adaptatif » (l'eau potable par défaut), les seuils ne sont plus fixes :
+
+- Chaque jour passé est classé *normal*, *anormal* ou *exclu*. La référence est la médiane des **28 derniers jours normaux**, volume et débit de fond ramenés au nombre d'habitants annoncé (`site.people`) ; le débit de fond évolue comme la racine du nombre d'habitants.
+- Un jour est *anormal* si son volume dépasse `spikeRatio` × le niveau normal, ou si son débit minimal dépasse `baseFlowRatio` × le débit de fond normal (et au moins `baseFlowMinLph` L/h de plus). **Les jours anormaux n'entrent pas dans la référence** : une fuite ou un écart durable n'est jamais « appris » comme normal.
+- Une hausse lente (emménagements progressifs) est suivie par la médiane glissante ; une hausse annoncée (`site.people` avec une date, même future) relève le niveau normal le jour dit.
+- `site.events` (remplissage de piscine, travaux) : alertes de consommation suspendues et jours non appris. `since` d'un compteur (« C'est le nouveau normal ») : on n'apprend qu'à partir de cette date (7 jours sans alerte adaptative le temps de réapprendre).
+- Le même code (`public/lib.js`, `evaluateMeter`) tourne dans le navigateur et dans le Worker (mails au bureau).

@@ -103,7 +103,7 @@ const SCENARIO = `
     out = [];
     for (const m of cfg.meters) {
       const rs = WM.toReadings(readings.map((r) => ({ time: r.ts, value: r.value })), 1);
-      for (const a of WM.evaluateAlerts(m.alerts, rs, WM.toIntervals(rs), now)) if (a.level === 'critical' || a.level === 'serious') out.push([m.variable + '|' + a.code, a.text]);
+      for (const a of WM.evaluateMeter(m, cfg.site, rs, WM.toIntervals(rs), now)) if (a.level === 'critical' || a.level === 'serious') out.push([m.variable + '|' + a.code, a.text]);
     }
   } else {
     const { bindLib, evaluate } = await import(process.argv[4]);

@@ -180,12 +180,12 @@
     for (const m of cfg.meters) {
       const d = state.data[m.id];
       if (!d || !d.readings.length) continue;
-      for (const a of WM.evaluateAlerts(m.alerts, d.readings, d.intervals, Date.now())) items.push({ m, a });
+      for (const a of WM.evaluateMeter(m, cfg.site, d.readings, d.intervals, Date.now())) items.push({ m, a });
     }
     const rank = { critical: 3, serious: 2, warning: 1 };
     items.sort((x, y) => rank[y.a.level] - rank[x.a.level]);
     $('#alert-list').innerHTML = items.length
-      ? items.map(({ m, a }) => `<li><span class="pill ${a.level}"><i aria-hidden="true">${LEVEL[a.level][1]}</i>${LEVEL[a.level][0]}</span><span class="who"><span class="dot" style="background:${colorVar(m)}"></span>${esc(m.name)}</span><span>${esc(a.text)}</span></li>`).join('')
+      ? items.map(({ m, a }) => `<li><span class="pill ${a.level}"><i aria-hidden="true">${LEVEL[a.level][1]}</i>${LEVEL[a.level][0]}</span><span class="who"><span class="dot" style="background:${colorVar(m)}"></span>${esc(m.name)}</span><span>${esc(a.text)}${m.adaptive && canEdit() && (a.code === 'daily' || a.code === 'baseflow') ? ` <button class="btn small" type="button" data-newnormal="${cfg.meters.indexOf(m)}" title="Consommation désormais normale (nouveaux habitants, piscine…) : le site réapprend le niveau normal">C'est le nouveau normal</button>` : ''}</span></li>`).join('')
       : '<li><span class="pill good"><i aria-hidden="true">✓</i>Normal</span><span>Aucune alerte : consommation et relevés dans les seuils.</span></li>';
   }
 
@@ -451,6 +451,13 @@
         <li><span class="pill warning"><i>!</i>Attention</span> : 80 % du seuil du jour, jour anormal, index en recul.</li>
       </ul>
       <p>Les alertes critiques et importantes sont aussi envoyées <strong>par mail au bureau</strong> (à l'apparition, rappel toutes les 24 h, puis au rétablissement).</p>
+      <h3>Des seuils qui suivent les besoins</h3>
+      <p>Pour l'eau potable, le site apprend la consommation <strong>normale par habitant</strong> (les 28 derniers jours normaux) et surveille l'écart : plus de maisons ou d'habitants ne déclenche pas de fausse alerte, une fuite (l'eau ne descend plus à zéro la nuit) ou un gros écart de consommation, si. Une hausse lente est suivie automatiquement ; un jour anormal n'est <strong>jamais</strong> appris comme « normal » tant qu'on ne l'a pas décidé.</p>
+      <ul>
+        <li><strong>Nouveaux habitants, nouvelles maisons</strong> : annoncez-les dans Paramètres → Situation du lotissement (nombre d'habitants au total à partir d'une date, y compris dans le futur). Le niveau normal monte ce jour-là.</li>
+        <li><strong>Événement ponctuel</strong> (remplissage de piscine, travaux) : annoncez-le en « Événements exceptionnels » ; les alertes de consommation sont suspendues et ces jours ne sont pas appris.</li>
+        <li><strong>Changement durable non annoncé</strong> (une piscine qui se remplit en continu…) : sur l'alerte, « C'est le nouveau normal » ; le site réapprend pendant 7 jours.</li>
+      </ul>
       <h3>Réservé au bureau</h3>
       <ul>
         <li><strong>Données</strong> (icône base de données) : ajouter un relevé fait à la main, corriger ou supprimer un relevé, et chercher un relevé par date.</li>
@@ -465,8 +472,30 @@
 
   /* ---------- Paramètres ---------- */
 
+  const peopleRow = (x) => `<div class="rowline" data-people><input type="date" name="p_from" value="${esc(x.from)}" aria-label="À partir du"><input type="number" name="p_n" min="1" max="100000" value="${x.n}" aria-label="Habitants"><span>habitants</span><button type="button" class="dlg-x" data-rm aria-label="Supprimer cette ligne" title="Supprimer">✕</button></div>`;
+  const eventRow = (x) => `<div class="rowline" data-event><input name="e_label" placeholder="Ex. remplissage de piscine" value="${esc(x.label)}" aria-label="Événement"><input type="date" name="e_from" value="${esc(x.from)}" aria-label="Du"><span>au</span><input type="date" name="e_to" value="${esc(x.to)}" aria-label="Au"><button type="button" class="dlg-x" data-rm aria-label="Supprimer cet événement" title="Supprimer">✕</button></div>`;
+
+  /** Ce que le site a appris d'un compteur (avec les paramètres enregistrés) : niveau normal, seuils. */
+  function adaptiveInfoText(m) {
+    const d = state.data[m.id];
+    if (!d || !d.readings.length) return 'Pas encore de données.';
+    const a = WM.adaptiveAssess(m, cfg.site, d.readings, d.intervals, Date.now());
+    const since = m.since ? ` (apprentissage depuis le ${m.since})` : '';
+    if (!a.ready) return `Apprentissage en cours : ${a.learned} journée${a.learned > 1 ? 's' : ''} normale${a.learned > 1 ? 's' : ''} retenue${a.learned > 1 ? 's' : ''} sur 7 nécessaires${since}. Les alertes automatiques de volume et de débit de fond commencent ensuite ; les autres règles restent actives.`;
+    const lim = [Number.isFinite(a.vMax) ? `la consommation du jour dépasse ${WM.fmtVolume(a.vMax)}` : '', Number.isFinite(a.fMax) ? `l'eau ne descend jamais sous ${Math.round(a.fMax)} L/h pendant 24 h` : ''].filter(Boolean).join(' ou ');
+    return `Niveau normal appris pour ${a.people} habitant${a.people > 1 ? 's' : ''} : environ ${WM.fmtVolume(a.ref.v)} par jour (${WM.fmtVolume(a.ref.v / a.people)} par habitant), débit de fond ≈ ${Math.round(a.ref.f)} L/h${since}. ${lim ? 'Alerte si ' + lim + '.' : ''}`;
+  }
+
   function settingsHtml() {
     const num = (name, label, v, extra = '', hint = '') => `<div class="field"><label>${label}</label><input name="${name}" type="number" min="0" ${extra} value="${v}">${hint ? `<span class="hint">${hint}</span>` : ''}</div>`;
+    const siteFs = `<fieldset id="site-fs"><legend>Situation du lotissement</legend>
+        <p class="small">Le site apprend la consommation <strong>normale par habitant</strong> et surveille l'écart : l'arrivée de nouveaux habitants ou de nouvelles maisons ne déclenche donc pas de fausses alertes, alors qu'une fuite, elle, reste signalée. Annoncez ici le nombre d'habitants <strong>au total</strong>, à partir de chaque date (passée ou prévue).</p>
+        <div id="people-rows">${(cfg.site.people || []).map(peopleRow).join('')}</div>
+        <div><button class="btn" type="button" id="btn-add-people">Ajouter un changement d'habitants</button></div>
+        <h3>Événements exceptionnels</h3>
+        <p class="small muted">Remplissage de piscine, travaux, fête… Pendant ces jours les alertes de consommation sont suspendues et le site n'apprend rien de ces journées.</p>
+        <div id="event-rows">${(cfg.site.events || []).map(eventRow).join('')}</div>
+        <div><button class="btn" type="button" id="btn-add-event">Ajouter un événement</button></div></fieldset>`;
     const meterFs = cfg.meters.map((m, i) => `
       <fieldset data-i="${i}" class="meter-fs"><legend><span class="dot" style="background:${colorVar(m)}"></span> ${esc(m.name)}</legend>
         <div class="field"><label>Nom</label><input name="name" value="${esc(m.name)}"></div>
@@ -477,8 +506,14 @@
             <option value="perso">Personnalisé (paramètres détaillés)</option>
           </select>
           <span class="hint" data-kind-hint></span></div>
+        <div class="adaptive-box" data-adaptive-box>
+          <label class="check"><input type="checkbox" name="adaptive" ${m.adaptive ? 'checked' : ''}> Seuils automatiques : ils s'adaptent au nombre d'habitants</label>
+          <input type="hidden" name="since" value="${esc(m.since || '')}">
+          <p class="small muted" data-adaptive-info>${esc(adaptiveInfoText(m))}</p>
+          <div><button class="btn" type="button" data-relearn>C'est le nouveau normal : réapprendre à partir d'aujourd'hui</button></div>
+        </div>
         <div class="grid2">
-          ${num('dailyLimitL', 'Consommation maximale par jour (L)', m.alerts.dailyLimitL, '', 'Alerte critique au-delà, « attention » à 80 %. 0 = pas de limite.')}
+          <div class="field" data-daily-field><label><span data-daily-lbl>Consommation maximale par jour (L)</span></label><input name="dailyLimitL" type="number" min="0" value="${m.alerts.dailyLimitL}"><span class="hint" data-daily-hint>Alerte critique au-delà, « attention » à 80 %. 0 = pas de limite.</span></div>
           ${num('staleHours', 'Aucun relevé depuis (h)', m.alerts.staleHours, '', 'Alerte critique si le compteur ne répond plus. Il envoie un relevé toutes les 2 h.')}
           <div class="field" data-quiet>${'<label>Pas de consommation de (h)</label>'}<input name="quietFromH" type="number" min="0" max="24" step="0.5" value="${m.alerts.quietFromH}"><span class="hint">Plage où l'arrosage ne doit pas couler, par exemple de 6 à 18.</span></div>
           <div class="field" data-quiet><label>… à (h)</label><input name="quietToH" type="number" min="0" max="24" step="0.5" value="${m.alerts.quietToH}"></div>
@@ -492,7 +527,7 @@
             ${num('quietMaxL', 'Plage ci-dessus : alerte si une tranche dépasse (L)', m.alerts.quietMaxL, '', '0 = désactivé.')}
             ${num('baseFlowRatio', 'Débit de fond : × la normale', m.alerts.baseFlowRatio, 'step="0.1"', '0 = désactivé. Pour un compteur qui ne s\'arrête jamais (fuite lente).')}
             ${num('baseFlowMinLph', '… et au moins (L/h) de plus', m.alerts.baseFlowMinLph)}
-            ${num('spikeRatio', 'Jour anormal : × la médiane', m.alerts.spikeRatio, 'step="0.1"', '0 = désactivé.')}
+            ${num('spikeRatio', 'Jour anormal : × la consommation normale', m.alerts.spikeRatio, 'step="0.1"', 'Avec les seuils automatiques : alerte si le volume du jour dépasse ce multiple du niveau normal pour le nombre d\'habitants. 0 = désactivé.')}
           </div>
           <div class="grid2">
             <div class="field"><label>Variable de l'index</label><input name="variable" list="vars" value="${esc(m.variable)}"></div>
@@ -503,6 +538,7 @@
     return `<form method="dialog" id="settings-form">
       <div class="dlg-head"><h2>Paramètres</h2><button class="dlg-x" type="button" aria-label="Fermer" title="Fermer" data-dlg-close>✕</button></div>
       ${mode === 'server' ? '<p class="hint">Ces paramètres s\'appliquent à tous les utilisateurs du site.</p>' : ''}
+      ${siteFs}
       ${meterFs}
       ${mode === 'server' ? `<fieldset><legend>Alertes par mail</legend>
         <p class="small">Le site recalcule les alertes toutes les heures. Les alertes <strong>critiques et importantes</strong> sont envoyées par mail au <strong>bureau</strong> (comptes « bureau » de l'ASL), via la messagerie Gmail de l'ASL : un mail à l'apparition, un rappel toutes les 24 h tant que l'alerte dure (3 au plus), un mail au rétablissement. Les alertes « attention » restent visibles sur la page seulement.</p>
@@ -535,10 +571,19 @@
       </div></form>`;
   }
 
+  /** Bouton de la liste d'alertes : la consommation actuelle devient la nouvelle normale (le site réapprend à partir d'aujourd'hui). */
+  async function newNormal(i) {
+    const m = cfg.meters[i]; if (!m) return;
+    if (!window.confirm(`Considérer la consommation actuelle de « ${m.name} » comme normale ?\n\nÀ utiliser après un changement durable : nouvelles maisons, piscine… Le site oubliera ce qu'il avait appris avant aujourd'hui et réapprendra le niveau normal pendant 7 jours (sans alerte automatique de volume ni de débit de fond pendant ce temps).\n\nSi c'est un événement ponctuel (remplissage de piscine), annoncez-le plutôt dans Paramètres → Événements exceptionnels.`)) return;
+    m.since = WM.dayKey(Date.now());
+    try { await saveCfg(); } catch (e) { window.alert('Enregistrement impossible : ' + e.message); }
+    start();
+  }
+
   /* ---------- Réglages d'alerte simplifiés : un type de compteur, deux seuils, le détail repliable ---------- */
 
   const KIND_PRESETS = {
-    reseau: { leakHours: 0, quietMaxL: 0, quietFromH: 0, quietToH: 0, baseFlowRatio: 2, baseFlowMinLph: 20, spikeRatio: 2.5 },
+    reseau: { leakHours: 0, quietMaxL: 0, quietFromH: 0, quietToH: 0, baseFlowRatio: 2, baseFlowMinLph: 20, spikeRatio: 2 },
     arrosage: { leakHours: 12, quietMaxL: 10, quietFromH: 6, quietToH: 18, baseFlowRatio: 0, baseFlowMinLph: 0, spikeRatio: 0 },
   };
   const KIND_HINT = {
@@ -552,16 +597,17 @@
     return 'perso';
   }
   /** Phrase qui dit, en clair, ce qui est surveillé avec les réglages du formulaire. */
-  function ruleSummary(a) {
+  function ruleSummary(a, adaptive) {
     const L = (x) => WM.fmtVolume(x), r = [];
     if (a.staleHours > 0) r.push(`aucun relevé depuis ${a.staleHours} h`);
-    if (a.dailyLimitL > 0) r.push(`plus de ${L(a.dailyLimitL)} par jour`);
+    if (adaptive && a.spikeRatio > 0) r.push(`consommation du jour × ${String(a.spikeRatio).replace('.', ',')} la normale (selon les habitants)`);
+    if (a.dailyLimitL > 0) r.push(adaptive ? `plafond absolu de ${L(a.dailyLimitL)} par jour` : `plus de ${L(a.dailyLimitL)} par jour`);
     if (a.monthlyLimitL > 0) r.push(`plus de ${L(a.monthlyLimitL)} par mois`);
     if (a.maxFlowLph > 0) r.push(`débit supérieur à ${a.maxFlowLph} L/h`);
     if (a.leakHours > 0) r.push(`écoulement continu depuis ${a.leakHours} h`);
     if (a.quietMaxL > 0 && a.quietToH > a.quietFromH) r.push(`plus de ${L(a.quietMaxL)} entre ${a.quietFromH} h et ${a.quietToH} h`);
     if (a.baseFlowRatio > 0) r.push(`débit de fond anormal (× ${String(a.baseFlowRatio).replace('.', ',')} la normale)`);
-    if (a.spikeRatio > 0) r.push(`jour × ${String(a.spikeRatio).replace('.', ',')} la médiane`);
+    if (!adaptive && a.spikeRatio > 0) r.push(`jour × ${String(a.spikeRatio).replace('.', ',')} la médiane`);
     return r.length ? `<strong>Alerte quand :</strong> ${r.join(' ; ')}.` : 'Aucune alerte active pour ce compteur.';
   }
   function wireMeterForm(fs) {
@@ -573,15 +619,25 @@
       sel.value = kind;
       fs.querySelector('[data-kind-hint]').textContent = KIND_HINT[kind];
       fs.querySelectorAll('[data-quiet]').forEach((el) => { el.hidden = kind === 'reseau'; });
-      fs.querySelector('[data-summary]').innerHTML = ruleSummary(a);
+      const ad = fs.querySelector('[name="adaptive"]').checked;
+      fs.querySelector('[data-summary]').innerHTML = ruleSummary(a, ad);
+      fs.querySelector('[data-adaptive-box]').hidden = kind === 'arrosage';
+      fs.querySelector('[data-daily-lbl]').textContent = ad ? 'Plafond absolu par jour (L), facultatif' : 'Consommation maximale par jour (L)';
+      fs.querySelector('[data-daily-hint]').textContent = ad ? 'Garde-fou en plus des seuils automatiques : alerte critique au-delà, quoi qu\'il arrive. 0 = aucun.' : 'Alerte critique au-delà, « attention » à 80 %. 0 = pas de limite.';
     };
     sel.onchange = () => {
       const p = KIND_PRESETS[sel.value];
       if (p) for (const [k, v] of Object.entries(p)) { if (k === 'quietFromH' || k === 'quietToH') { if (v === 0 || !Number(inp(k).value)) inp(k).value = v; } else inp(k).value = v; }
       if (p && Number(inp('maxFlowLph').value) === 0) inp('maxFlowLph').value = 1500;
+      if (sel.value === 'reseau') { inp('adaptive').checked = true; inp('dailyLimitL').value = 0; } else if (sel.value === 'arrosage') inp('adaptive').checked = false;
       refresh(sel.value);
     };
     fs.addEventListener('input', (e) => { if (e.target !== sel) refresh(); });
+    fs.querySelector('[data-relearn]').onclick = () => {
+      if (!window.confirm('Considérer la consommation actuelle comme normale ?\n\nLe site oubliera ce qu\'il avait appris avant aujourd\'hui et réapprendra le niveau normal pendant 7 jours (sans alerte automatique de volume ni de débit de fond pendant ce temps). À utiliser après un changement durable : nouvelles maisons, piscine…')) return;
+      inp('since').value = WM.dayKey(Date.now());
+      fs.querySelector('[data-adaptive-info]').textContent = 'Le site réapprendra à partir d\'aujourd\'hui dès que vous aurez enregistré.';
+    };
     refresh();
     if (kindOf(read()) === 'perso') fs.querySelector('details.adv').open = true;
   }
@@ -597,7 +653,17 @@
       m.name = v('name').trim() || m.name; m.variable = v('variable').trim();
       m.litresPerUnit = Number(v('litresPerUnit')) || 1;
       for (const k of ['dailyLimitL', 'monthlyLimitL', 'maxFlowLph', 'leakHours', 'quietFromH', 'quietToH', 'quietMaxL', 'baseFlowRatio', 'baseFlowMinLph', 'spikeRatio', 'staleHours']) m.alerts[k] = Number(v(k)) || 0;
+      m.adaptive = fs.querySelector('[name="adaptive"]').checked;
+      m.since = /^\d{4}-\d{2}-\d{2}$/.test(v('since')) ? v('since') : '';
     });
+    const val = (row, n) => row.querySelector(`[name="${n}"]`).value;
+    const people = [...form.querySelectorAll('[data-people]')].map((r) => ({ from: val(r, 'p_from'), n: Math.round(Number(val(r, 'p_n'))) }))
+      .filter((x) => /^\d{4}-\d{2}-\d{2}$/.test(x.from) && x.n >= 1).sort((a, b) => (a.from < b.from ? -1 : 1));
+    next.site = {
+      people: people.length ? people : cfg.site.people,
+      events: [...form.querySelectorAll('[data-event]')].map((r) => ({ label: val(r, 'e_label').trim() || 'Événement', from: val(r, 'e_from'), to: val(r, 'e_to') }))
+        .filter((x) => /^\d{4}-\d{2}-\d{2}$/.test(x.from) && /^\d{4}-\d{2}-\d{2}$/.test(x.to) && x.from <= x.to),
+    };
     return next;
   }
 
@@ -737,6 +803,9 @@
     dlg.innerHTML = settingsHtml();
     $('#btn-detect').onclick = detectVariables;
     dlg.querySelectorAll('fieldset.meter-fs').forEach(wireMeterForm);
+    $('#btn-add-people').onclick = () => { const rows = $('#people-rows').querySelectorAll('[data-people]'); const last = rows.length ? Number(rows[rows.length - 1].querySelector('[name="p_n"]').value) || 6 : 6; $('#people-rows').insertAdjacentHTML('beforeend', peopleRow({ from: WM.dayKey(Date.now()), n: last })); };
+    $('#btn-add-event').onclick = () => $('#event-rows').insertAdjacentHTML('beforeend', eventRow({ label: '', from: WM.dayKey(Date.now()), to: WM.dayKey(Date.now()) }));
+    $('#site-fs').onclick = (e) => { const b = e.target.closest('[data-rm]'); if (b) b.closest('.rowline').remove(); };
     if (mode === 'server') { loadKeyBox(); loadBackupBox(); loadAlertsMailBox(); }
     $('#btn-cancel').onclick = () => dlg.close();
     const persist = async () => { try { await saveCfg(); } catch (e) { window.alert('Enregistrement impossible : ' + e.message); } start(); };
@@ -974,6 +1043,7 @@
     document.addEventListener('click', (e) => {
       const t = e.target.closest('button'); if (!t) return;
       if (t.hasAttribute('data-open-settings')) openSettings();
+      else if (t.dataset.newnormal != null) newNormal(Number(t.dataset.newnormal));
       else if (t.dataset.tab) { state.tab = t.dataset.tab; renderChart(); }
       else if (t.dataset.mode) { state.mode = t.dataset.mode; renderChart(); }
       else if (t.dataset.synth) { state.synthMode = t.dataset.synth; renderCards(); }
