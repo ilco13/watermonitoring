@@ -453,7 +453,7 @@
       <p>Les alertes critiques et importantes sont aussi envoyées <strong>par mail au bureau</strong> (à l'apparition, rappel toutes les 24 h, puis au rétablissement).</p>
       <h3>Réservé au bureau</h3>
       <ul>
-        <li><strong>Données</strong> : ajouter un relevé fait à la main, corriger ou supprimer un relevé, et chercher un relevé par date.</li>
+        <li><strong>Données</strong> (icône base de données) : ajouter un relevé fait à la main, corriger ou supprimer un relevé, et chercher un relevé par date.</li>
         <li><strong>Paramètres</strong> (icône d'engrenage) : pour chaque compteur, son type (réseau ou arrosage), la consommation maximale par jour et le délai sans relevé ; les alertes par mail ; et, repliés, les réglages techniques : réception depuis Live Objects, clé de réception, sauvegardes et export CSV de tous les relevés.</li>
       </ul>
       <p class="small muted">${bureau ? 'Vous êtes membre du bureau : vous voyez ces deux boutons.' : 'Vous consultez le suivi : les boutons Données et Paramètres sont réservés au bureau.'} Le thème clair ou sombre se change avec le bouton rond en haut à droite ; il suit aussi le site de l'ASL.</p>

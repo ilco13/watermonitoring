@@ -294,6 +294,10 @@ code { background: var(--bg); border-radius: 4px; padding: .05rem .3rem; font-si
   .linkout { font-size: .85rem; }
 }
 
+/* Bloc nom / cagnotte / Déconnexion : trois lignes alignées sur le même bord (le nom pile au-dessus de la cagnotte) */
+.top-user .who-line { flex-direction: column; align-items: flex-start; gap: 0; }
+@media (min-width: 1240px) { .top-user { align-items: flex-start; } }
+
 /* Paramètres : alertes par mail */
 .check { display: flex; align-items: center; gap: .5rem; margin: .4rem 0; font-weight: 600; }
 .check input { width: auto; min-height: 0; }
