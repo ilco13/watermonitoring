@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Consommation d'eau</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div>
+      <h1>Consommation d'eau</h1>
+      <p id="status" class="muted" aria-live="polite">Chargement…</p>
+    </div>
+    <div class="actions">
+      <button class="btn" id="btn-refresh" type="button">Actualiser</button>
+      <button class="btn" id="btn-theme" type="button" title="Thème">Thème : auto</button>
+      <button class="btn" id="btn-settings" type="button">Réglages</button>
+    </div>
+  </header>
+
+  <div id="banner" class="banner" hidden></div>
+
+  <section class="panel" aria-labelledby="h-alerts">
+    <h2 id="h-alerts">Alertes</h2>
+    <ul id="alert-list"></ul>
+  </section>
+
+  <section id="cards" class="cards" aria-label="Compteurs"></section>
+
+  <section class="panel" aria-labelledby="h-conso">
+    <div class="panel-head">
+      <h2 id="h-conso">Consommation</h2>
+      <div class="tabs" role="tablist" id="tabs" aria-label="Période">
+        <button role="tab" data-tab="h48" aria-selected="false">48 h</button>
+        <button role="tab" data-tab="d30" aria-selected="true">30 jours</button>
+        <button role="tab" data-tab="d90" aria-selected="false">90 jours</button>
+        <button role="tab" data-tab="m12" aria-selected="false">12 mois</button>
+        <button role="tab" data-tab="y" aria-selected="false">Années</button>
+      </div>
+    </div>
+    <div class="toolbar">
+      <div class="legend" id="legend" aria-label="Compteurs affichés"></div>
+      <div class="opts">
+        <div class="seg" id="stack-seg" aria-label="Disposition">
+          <button type="button" data-stack="0" aria-pressed="true">Côte à côte</button>
+          <button type="button" data-stack="1" aria-pressed="false">Empilé</button>
+        </div>
+        <label><input type="checkbox" id="as-table"> Tableau</label>
+      </div>
+    </div>
+    <div class="chartwrap" id="chartwrap"><canvas id="chart" role="img" aria-label="Histogramme de consommation"></canvas></div>
+    <div class="tablewrap" id="tablewrap" hidden></div>
+  </section>
+
+  <section class="panel" aria-labelledby="h-heat">
+    <div class="panel-head">
+      <div>
+        <h2 id="h-heat">Profil horaire moyen</h2>
+        <div class="small muted">Litres par tranche de 2 h, moyenne sur les 4 dernières semaines. Une fuite se voit en cases colorées la nuit.</div>
+      </div>
+      <div class="seg" id="heat-seg" aria-label="Compteur"></div>
+    </div>
+    <div id="heat" class="heat" role="img" aria-label="Profil horaire moyen par jour de la semaine"></div>
+    <div class="scale" id="heat-scale"></div>
+  </section>
+
+  <p class="small muted">Les consommations sont calculées à partir des index relevés toutes les 2 h, avec interpolation aux changements de jour, de mois et d'année (heure locale du navigateur).</p>
+</div>
+
+<div id="tip" role="tooltip"></div>
+<dialog id="settings"></dialog>
+
+<script src="vendor/chart.umd.js"></script>
+<script src="lib.js"></script>
+<script src="demo.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
