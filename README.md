@@ -47,6 +47,8 @@ Fonctionnement : une visite sans session renvoie vers l'ASL (`/sso/eau`), qui re
 
 **Thème** : couleurs, barre d'en-tête, pastilles, cartes et boutons reprennent ceux de l'ASL (clair par défaut ; un bouton « Thème » propose un mode sombre). Le nom et le logo viennent de `ASL_NAME` et `ASL_URL` dans `wrangler.jsonc` ; le logo est chargé depuis le site de l'ASL, qui est la seule origine étrangère autorisée par la politique de sécurité.
 
+**Déconnexion** : le bouton « Déconnexion » ferme la session d'ici **et** celle de l'ASL (sinon l'ASL, resté connecté, rouvrirait aussitôt une session). Le site demande à l'ASL de fermer la sienne avec un jeton signé de 60 secondes : un lien posé sur un site tiers ne peut déconnecter personne. La session ici étant un cookie signé de 12 h, un cookie copié avant la déconnexion resterait valable jusqu'à son expiration.
+
 La signature utilise un secret `SSO_SECRET` **identique dans l'ASL et ici**. Sans lui, le site refuse tout (503).
 
 ## Mise en route (hébergement gratuit Cloudflare)

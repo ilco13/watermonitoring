@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { sign, verify, getCookie, safeNext, roleOf, makeSession } from '../src/auth.js';
+import { sign, verify, getCookie, safeNext, roleOf, makeSession, clearSessionCookie } from '../src/auth.js';
 
 const S = 'secret-de-test-assez-long-0123456789';
 const NOW = 1_800_000_000_000;
@@ -43,4 +43,14 @@ test('rôles : seul « admin » (bureau) est administrateur', async () => {
   const s = await verify(await makeSession({ sub: 1, email: 'a@b.fr', name: 'A', role: 'admin' }, S, NOW), S, 'eau-session', NOW + 1000);
   assert.equal(s.role, 'admin');
   assert.equal(await verify(await makeSession({ sub: 1, role: 'admin' }, S, NOW), S, 'eau-session', NOW + 13 * 3600_000), null, 'session expirée après 12 h');
+});
+
+test('jeton de déconnexion : audience dédiée, expire vite, inutilisable ailleurs', async () => {
+  const t = await sign({ v: 1, aud: 'asl-logout', sub: '7', exp: NOW + 60_000 }, S);
+  assert.equal((await verify(t, S, 'asl-logout', NOW)).sub, '7');
+  assert.equal(await verify(t, S, 'eau', NOW), null, "pas un jeton de connexion");
+  assert.equal(await verify(t, S, 'eau-session', NOW), null, "pas une session");
+  assert.equal(await verify(t, S, 'asl-logout', NOW + 61_000), null, 'expiré');
+  assert.match(clearSessionCookie(true), /Max-Age=0.*Secure/);
+  assert.doesNotMatch(clearSessionCookie(false), /Secure/);
 });

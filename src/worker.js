@@ -12,6 +12,7 @@
  *   GET  /api/variables, /api/events                            diagnostic              (bureau)
  *   GET/POST/DELETE /api/readings                               liste, ajout, correction, suppression d'un relevé (bureau)
  *   GET/POST /api/ingest-key                                    état / régénération de la clé Live Objects (bureau)
+ *   POST /api/logout                                            ferme la session ici et renvoie l'adresse qui ferme aussi celle de l'ASL
  *   tout le reste       fichiers de public/ (intégrés au Worker)
  *
  * Non connecté : les pages renvoient vers l'ASL (qui renvoie ici une fois connecté), les appels d'API reçoivent 401.
@@ -19,7 +20,7 @@
  * Sans l'un de ces secrets, la partie concernée répond 503 : jamais ouverte par oubli.
  */
 import { parseIngest } from './ingest.js';
-import { SESSION_COOKIE, getCookie, makeSession, safeNext, sessionCookie, verify } from './auth.js';
+import { SESSION_COOKIE, clearSessionCookie, getCookie, makeSession, safeNext, sessionCookie, sign, verify } from './auth.js';
 import ASSETS from './assets.js'; // généré depuis public/ par scripts/build-assets.mjs
 
 const MAX_BODY = 1_000_000;   // octets
@@ -223,9 +224,23 @@ async function ingestKeyStatus(env) {
 
 const FORBIDDEN = () => json({ status: false, message: 'Réservé au bureau' }, 403);
 
+/**
+ * Déconnexion : supprime le cookie de session d'ici et renvoie l'adresse de l'ASL qui ferme aussi sa session. Sans cela, l'ASL
+ * restant connecté, le site de l'eau rouvrirait aussitôt une session. L'adresse porte un jeton signé de 60 s : seul ce site
+ * peut demander à l'ASL de fermer une session (un site tiers ne peut pas déconnecter quelqu'un par un simple lien).
+ */
+async function handleLogout(request, url, env, session) {
+  if (!writeAllowed(request, url)) return json({ status: false, message: 'Requête refusée' }, 403);
+  const token = await sign({ v: 1, aud: 'asl-logout', sub: String(session.sub ?? ''), nonce: hex(crypto.getRandomValues(new Uint8Array(16))), exp: Date.now() + 60_000 }, env.SSO_SECRET);
+  const res = json({ status: true, result: { url: `${env.ASL_URL.replace(/\/$/, '')}/sso/deconnexion?token=${token}` } });
+  res.headers.append('Set-Cookie', clearSessionCookie(url.protocol === 'https:'));
+  return res;
+}
+
 async function handleApi(request, url, env, session) {
   const p = url.pathname;
   const admin = session.role === 'admin';
+  if (p === '/api/logout' && request.method === 'POST') return handleLogout(request, url, env, session);
   if (p === '/api/readings') return admin ? handleReadings(request, url, env) : FORBIDDEN();
 
   if (p === '/api/config' && request.method === 'PUT') {

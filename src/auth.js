@@ -13,6 +13,9 @@ export const SESSION_COOKIE = 'eau_session';
 export const SESSION_SECONDS = 12 * 3600;
 export const SSO_TTL_SECONDS = 60;
 
+/** Cookie de session expiré : le navigateur le supprime. */
+export const clearSessionCookie = (secure) => `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure ? '; Secure' : ''}`;
+
 const b64 = {
   enc: (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''),
   dec: (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0)),

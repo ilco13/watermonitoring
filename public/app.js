@@ -673,6 +673,7 @@
   function applyRole() {
     $('#btn-settings').hidden = !canEdit();
     $('#btn-readings').hidden = !canEdit();
+    $('#btn-logout').hidden = mode !== 'server';
   }
 
   /* ---------- Orchestration ---------- */
@@ -703,6 +704,10 @@
     applyTheme(theme);
     $('#btn-theme').onclick = () => { applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'); renderChart(); };
     $('#btn-refresh').onclick = async () => { $('#status').textContent = 'Actualisation…'; await loadAll(); renderAll(); };
+    $('#btn-logout').onclick = async () => {
+      try { location.href = (await apiSend('POST', 'logout', {})).result.url; }   // ferme la session ici puis celle de l'ASL
+      catch (e) { window.alert('Déconnexion impossible : ' + e.message); }
+    };
     $('#btn-settings').onclick = openSettings;
     $('#btn-readings').onclick = openReadings;
     setupReadings();
