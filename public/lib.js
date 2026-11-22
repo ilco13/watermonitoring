@@ -19,6 +19,9 @@
 
   const H = 3600e3;
   const DAY = 24 * H;
+  // En dessous, un intervalle ne dit rien sur un débit (deux relevés rapprochés par un rejeu ou un doublon) :
+  // quelques litres sur quelques secondes donneraient des millions de L/h.
+  const MIN_FLOW_SPAN = 30 * 60e3;
 
   /* ---------- Relevés -> intervalles ---------- */
 
@@ -155,8 +158,12 @@
   const LEVEL_RANK = { critical: 3, serious: 2, warning: 1 };
 
   /**
-   * cfg : { dailyLimitL, monthlyLimitL, maxFlowLph, leakHours, spikeRatio, staleHours }
+   * cfg : { dailyLimitL, monthlyLimitL, maxFlowLph, leakHours, baseFlowRatio, baseFlowMinLph, spikeRatio, staleHours }
    * (0 / vide = règle désactivée)
+   *  - leakHours : écoulement sans le moindre arrêt (utile si le compteur s'arrête normalement, ex. arrosage)
+   *  - baseFlowRatio / baseFlowMinLph : « débit de fond » (le plus petit débit des dernières 24 h) supérieur à
+   *    ratio × sa valeur habituelle (médiane des minima des 14 jours précédents) ET d'au moins baseFlowMinLph L/h
+   *    de plus. Adapté à un compteur qui ne s'arrête jamais vraiment (réseau d'une ASL).
    */
   function evaluateAlerts(cfg, readings, intervals, now) {
     const out = [];
@@ -183,7 +190,7 @@
     if (cfg.maxFlowLph > 0) {
       let peak = null;
       for (const iv of intervals) {
-        if (iv.t1 < lastT - DAY) continue;
+        if (iv.t1 < lastT - DAY || iv.t1 - iv.t0 < MIN_FLOW_SPAN) continue;
         const f = iv.d / ((iv.t1 - iv.t0) / H);
         if (!peak || f > peak.f) peak = { f, t1: iv.t1 };
       }
@@ -196,12 +203,31 @@
       let run = 0, minFlow = Infinity;
       for (let i = intervals.length - 1; i >= 0; i--) {
         const iv = intervals[i];
+        if (iv.t1 - iv.t0 < MIN_FLOW_SPAN && !iv.reset) continue;
         if (iv.d <= 0 || iv.reset) break;
         run += iv.t1 - iv.t0;
         minFlow = Math.min(minFlow, iv.d / ((iv.t1 - iv.t0) / H));
       }
       if (run >= cfg.leakHours * H) {
         out.push({ level: 'serious', code: 'leak', text: `Fuite possible : l'eau coule sans interruption depuis ${fmtDuration(run)} (débit minimum ${minFlow < 10 ? minFlow.toFixed(1) : Math.round(minFlow)} L/h).` });
+      }
+    }
+    if (cfg.baseFlowRatio > 0) {
+      const flowsOf = (a, b) => intervals
+        .filter((iv) => iv.t1 > a && iv.t1 <= b && !iv.reset && iv.t1 - iv.t0 >= MIN_FLOW_SPAN)
+        .map((iv) => iv.d / ((iv.t1 - iv.t0) / H));
+      const current = flowsOf(lastT - DAY, lastT);
+      const edges = edgesBack(lastT - 2 * DAY, 14, 'day'); // 14 jours complets qui précèdent les dernières 24 h
+      const mins = [];
+      for (let i = 0; i < 14; i++) {
+        const f = flowsOf(edges[i], edges[i + 1]);
+        if (f.length >= 8) mins.push(Math.min(...f));
+      }
+      if (current.length >= 10 && mins.length >= 7) {
+        const cur = Math.min(...current), ref = median(mins);
+        if (cur > cfg.baseFlowRatio * ref && cur - ref > (cfg.baseFlowMinLph || 0)) {
+          out.push({ level: 'serious', code: 'baseflow', text: `Débit de fond anormal : l'eau ne descend pas sous ${Math.round(cur)} L/h depuis 24 h (habituellement ${Math.round(ref)} L/h). Fuite possible.` });
+        }
       }
     }
     if (cfg.spikeRatio > 0) {
