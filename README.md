@@ -23,12 +23,12 @@ Le décodage reprend celui de votre ancien parseur TagoIO : le message Live Obje
 
 | Dans le message | Variable stockée | Valeur |
 |---|---|---|
-| `genericSensor["0"].sensorValue` | `index_eau_1` | index en litres |
-| `genericSensor["1"].sensorValue` | `index_eau_2` | index en litres |
+| `genericSensor["0"].sensorValue` | `index_eau_1` (eau potable) | index en litres |
+| `genericSensor["1"].sensorValue` | `index_eau_2` (arrosage) | index en litres |
 
 Le message peut être l'objet Live Objects lui-même, ou sa version texte JSON dans un champ `value` (comme dans votre parseur). Le format TagoIO (`[{"variable":…,"value":…,"time":…}]`) et les messages dont l'objet `value` contient des champs numériques sont aussi acceptés. L'heure est celle du message (`timestamp`, `time` ou `created`), à défaut l'heure de réception. Les messages rejoués par Live Objects sont ignorés (pas de doublons).
 
-Par défaut, **eau potable = `index_eau_2`** et **arrosage = `index_eau_1`**. Si c'est l'inverse, échangez les variables dans Réglages.
+Les variables associées à chaque compteur se changent dans Réglages.
 
 ## Mise en route (hébergement gratuit Cloudflare)
 

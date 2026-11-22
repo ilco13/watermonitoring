@@ -11,11 +11,11 @@
   const DEFAULT_CFG = {
     historyYears: 3,
     refreshMin: 10,
-    // index_eau_1 = voie 0 du compteur (genericSensor "0"), index_eau_2 = voie 1 ; index en litres
+    // index_eau_1 = voie 0 (genericSensor "0") = eau potable ; index_eau_2 = voie 1 = arrosage ; index en litres
     meters: [
-      { id: 'potable', name: 'Eau potable', variable: 'index_eau_2', litresPerUnit: 1, slot: 1,
+      { id: 'potable', name: 'Eau potable', variable: 'index_eau_1', litresPerUnit: 1, slot: 1,
         alerts: { dailyLimitL: 800, monthlyLimitL: 0, maxFlowLph: 2000, leakHours: 24, spikeRatio: 3, staleHours: 6 } },
-      { id: 'arrosage', name: 'Arrosage', variable: 'index_eau_1', litresPerUnit: 1, slot: 2,
+      { id: 'arrosage', name: 'Arrosage', variable: 'index_eau_2', litresPerUnit: 1, slot: 2,
         alerts: { dailyLimitL: 3000, monthlyLimitL: 0, maxFlowLph: 4000, leakHours: 0, spikeRatio: 0, staleHours: 6 } },
     ],
   };
