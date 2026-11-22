@@ -18,7 +18,9 @@ const TYPES = {
   '.json': 'application/json; charset=utf-8',
   '.svg': 'image/svg+xml',
   '.txt': 'text/plain; charset=utf-8',
+  '.png': 'image/png',
 };
+const BINARY = new Set(['.png']);   // intégrés en base64 (décodés par le Worker)
 
 function* walk(dir) {
   for (const e of readdirSync(dir, { withFileTypes: true })) {
@@ -30,11 +32,14 @@ function* walk(dir) {
 const assets = {};
 for (const file of walk(pub)) {
   const ext = extname(file).toLowerCase();
-  if (!TYPES[ext]) throw new Error(`Type de fichier non géré dans public/ : ${file} (texte uniquement)`);
-  const body = readFileSync(file, 'utf8');
+  if (!TYPES[ext]) throw new Error(`Type de fichier non géré dans public/ : ${file} (texte ou PNG)`);
+  const raw = readFileSync(file);
+  const bin = BINARY.has(ext);
+  const body = bin ? raw.toString('base64') : raw.toString('utf8');
   assets['/' + relative(pub, file).split('\\').join('/')] = {
     type: TYPES[ext],
-    etag: '"' + createHash('sha1').update(body).digest('hex').slice(0, 16) + '"',
+    etag: '"' + createHash('sha1').update(raw).digest('hex').slice(0, 16) + '"',
+    ...(bin ? { b64: true } : {}),
     body,
   };
 }

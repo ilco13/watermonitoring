@@ -420,6 +420,7 @@ function serveAsset(request, url, env) {
     headers.etag = a.etag;
     if (request.headers.get('If-None-Match') === a.etag) return new Response(null, { status: 304, headers });
   }
+  if (a.b64) { body = Uint8Array.from(atob(body), (c) => c.charCodeAt(0)); headers['cache-control'] = 'public, max-age=86400'; }
   return new Response(request.method === 'HEAD' ? null : body, { headers });
 }
 
@@ -471,6 +472,9 @@ export default {
         { status: 503, headers: { 'content-type': 'text/plain; charset=utf-8' } });
     }
     if (url.pathname === '/sso/callback') return handleSsoCallback(request, url, env);
+
+    // l'icône est publique : elle doit s'afficher dans l'onglet même avant la connexion
+    if (url.pathname === '/icone.png') return serveAsset(request, url, env);
 
     const cookie = getCookie(request, SESSION_COOKIE);
     const session = cookie ? await verify(cookie, env.SSO_SECRET, 'eau-session') : null;

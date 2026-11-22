@@ -377,7 +377,7 @@
       ? `Une case colorée entre ${qa.quietFromH} h et ${qa.quietToH} h est suspecte : ce compteur ne consomme normalement pas à cette heure.`
       : qa.baseFlowRatio > 0 ? 'Une fuite se voit en cases colorées la nuit, quand plus personne ne consomme.'
         : 'Une case colorée à une heure où le compteur ne consomme normalement pas est suspecte.';
-    $('#heat-hint').textContent = `Litres par tranche de 2 h, moyenne sur les 4 dernières semaines. ${hint}`;  // complété plus bas si les tranches sont décalées
+    $('#heat-hint').textContent = `Litres par tranche de 2 h, moyenne sur les 4 dernières semaines. ${hint} La case entourée (dernière mesure) est rouge si elle consomme plus que d'habitude, verte si moins, blanche si c'est pareil.`;  // complété plus bas si les tranches sont décalées
     const off = WM.heatOffset(d.readings);                        // tranches décalées comme les relevés (ex. 16 h 30 – 18 h 30)
     const hh = (min) => `${Math.floor(min / 60) % 24}h${min % 60 ? String(min % 60).padStart(2, '0') : ''}`;
     if (off) $('#heat-hint').textContent += ` Les tranches sont décalées de ${off % 60 ? off + ' min' : off / 60 + ' h'} pour coïncider avec les relevés (par exemple ${hh(16 * 60 + off)} – ${hh(18 * 60 + off)}).`;
@@ -401,7 +401,12 @@
       row.forEach((val, c) => {
         const isNow = r === nowRow && c === nowCol;
         const pct = val <= 0 ? 0 : 10 + 90 * (val / max);
-        const bg = val <= 0 ? 'color-mix(in srgb, var(--text-muted) 10%, var(--surface-1))' : `color-mix(in srgb, ${colorVar(m)} ${pct.toFixed(0)}%, var(--surface-1))`;
+        let bg = val <= 0 ? 'color-mix(in srgb, var(--text-muted) 10%, var(--surface-1))' : `color-mix(in srgb, ${colorVar(m)} ${pct.toFixed(0)}%, var(--surface-1))`;
+        // la case de la dernière mesure change de couleur selon la comparaison avec d'habitude : rouge = plus, vert = moins, blanc = pareil
+        if (isNow && tr && tr.level !== 'unknown') {
+          const k = tr.level === 'same' ? 0 : tr.level === 'unusual' ? 60 : Math.min(70, 25 + Math.abs(tr.pct) / 2);
+          bg = tr.level === 'same' ? 'var(--surface-1)' : `color-mix(in srgb, var(${tr.level === 'down' ? '--green' : '--red'}) ${k.toFixed(0)}%, var(--surface-1))`;
+        }
         const lbl = `${days[r]} ${slot(c)} : ${vol(val)} en moyenne${isNow ? ' — dernière tranche mesurée' : ''}`;
         html += `<div class="c${isNow ? ' now' : ''}" data-tip="${esc(lbl)}" style="background:${bg}" role="presentation">${isNow ? `<span class="nt"><b>${tag[0]}</b><span class="t"> ${esc(tag[1])}</span></span>` : ''}</div>`;
       });
@@ -435,7 +440,7 @@
       <ul>
         <li><strong>Synthèse</strong> : les alertes en cours, puis pour chaque compteur la consommation d'aujourd'hui, d'hier, de la semaine, du mois et de l'année. « Calendaire » compte depuis le début du jour, de la semaine (lundi), du mois, de l'année ; « Glissant » compte les dernières 24 h, 7 jours, 30 jours, 12 mois.</li>
         <li><strong>Graphiques</strong> : la consommation par heure, jour, semaine, mois ou année, et l'index du compteur. Le signe « ≈ » ou une teinte plus claire signale une période seulement estimée, faute de relevés assez rapprochés.</li>
-        <li><strong>Profil horaire</strong> : la consommation moyenne de chaque tranche de 2 h, par jour de semaine (4 dernières semaines). La case entourée est celle de la <strong>dernière mesure</strong> ; la flèche dit si elle est plus forte (▲) ou plus faible (▼) que d'habitude. Selon le compteur : pour l'eau potable une fuite se voit en cases colorées la nuit ; pour l'arrosage (qui ne coule que la nuit) c'est une case colorée en journée qui est suspecte.</li>
+        <li><strong>Profil horaire</strong> : la consommation moyenne de chaque tranche de 2 h, par jour de semaine (4 dernières semaines). La case entourée est celle de la <strong>dernière mesure</strong> ; elle devient rouge si la consommation est plus forte que d'habitude (▲), verte si elle est plus faible (▼), et reste blanche si c'est pareil (=). Selon le compteur : pour l'eau potable une fuite se voit en cases colorées la nuit ; pour l'arrosage (qui ne coule que la nuit) c'est une case colorée en journée qui est suspecte.</li>
       </ul>
       <h3>D'où viennent les chiffres</h3>
       <p>Le compteur envoie son index toutes les 2 heures environ ; la consommation d'une période est calculée à partir de ces index, répartis au prorata du temps. Le prochain relevé attendu est indiqué en haut de page. Le bouton ↻ recharge les données.</p>
@@ -509,8 +514,8 @@
       <div class="stack">
       <fieldset><legend>Données reçues de Live Objects</legend>
         <div class="grid2">
-          <div class="field"><label>Historique chargé (années)</label><input name="historyYears" type="number" min="1" max="10" value="${cfg.historyYears}"></div>
-          <div class="field"><label>Actualisation (minutes)</label><input name="refreshMin" type="number" min="1" value="${cfg.refreshMin}"></div>
+          <div class="field"><label>Historique affiché (années)</label><input name="historyYears" type="number" min="1" max="10" value="${cfg.historyYears}"><span class="hint">Combien d'années de relevés la page charge à son ouverture pour les graphiques et les comparaisons (année précédente…). Tous les relevés restent conservés ; une valeur plus grande rend seulement le chargement plus lent.</span></div>
+          <div class="field"><label>Actualisation automatique (minutes)</label><input name="refreshMin" type="number" min="1" value="${cfg.refreshMin}"><span class="hint">Toutes les combien de minutes une page restée ouverte va chercher les nouveaux relevés. Le compteur n'en envoie qu'un toutes les 2 h : 10 minutes suffisent.</span></div>
         </div>
         <div><button class="btn" type="button" id="btn-detect">Variables et derniers messages reçus</button></div>
         <div id="detect-out" hidden></div><datalist id="vars"></datalist>

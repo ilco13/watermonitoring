@@ -308,3 +308,8 @@ details.adv > summary { cursor: pointer; font-weight: 600; color: var(--blue); m
 .help-body h3 { font-size: 1rem; margin: .6rem 0 0; }
 .help-body ul { margin: 0; padding-left: 1.2rem; display: grid; gap: .45rem; }
 .help-body p { margin: 0; }
+
+/* Synthèse : passer de « Calendaire » à « Glissant » ne doit rien déplacer (le texte d'explication a sa propre ligne ; les textes sous les chiffres gardent la même hauteur) */
+.synth-note { margin: -.35rem 0 .75rem; line-height: 1.4; min-height: 1.4em; }
+.hero-sub { line-height: 1.4; min-height: 2.8em; }
+@media (max-width: 700px) { .synth-note { min-height: 2.8em; } .hero-sub { min-height: 4.2em; } .stats { min-height: 9.5rem; align-content: start; } }
