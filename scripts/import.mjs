@@ -1,59 +1,41 @@
 #!/usr/bin/env node
 /*
- * Reprend un historique (export TagoIO, JSON ou CSV) dans le tableau de bord, via /ingest.
+ * Reprend un historique (export TagoIO ou Orange Live Objects, JSON ou CSV) dans le tableau de bord, via /ingest.
  *
- *   node scripts/import.mjs <fichier.json|fichier.csv> <https://eau.xxx.workers.dev> <INGEST_KEY>
+ *   node scripts/import.mjs <fichier> <https://eau.xxx.workers.dev> <clé> [--after=ISO] [--before=ISO]
  *
- * JSON : tableau d'objets {variable, value, time} ou réponse de l'API TagoIO {"result":[...]}.
- * CSV  : première ligne = en-têtes, dont au minimum variable, value, time (séparateur , ou ;).
- * Les doublons sont ignorés par le serveur : on peut relancer sans risque.
+ * --after / --before bornent la période importée (heure incluse / exclue, ex. --before=2026-10-01T01:30:00Z).
+ * Indispensable pour combler un trou sans dupliquer les relevés déjà présents : TagoIO note l'heure de réception (quelques
+ * secondes après l'heure du compteur que note Live Objects), donc deux sources pour la même période feraient des quasi-doublons.
+ * Les relevés strictement identiques (même variable, même heure) sont ignorés par le serveur : on peut relancer sans risque.
+ * Formats reconnus : voir scripts/import-lib.mjs.
  */
 import { readFileSync } from 'node:fs';
+import { parseExport } from './import-lib.mjs';
 
-const [file, base, key] = process.argv.slice(2);
+const args = process.argv.slice(2);
+const opts = Object.fromEntries(args.filter((a) => a.startsWith('--')).map((a) => { const [k, v] = a.slice(2).split('='); return [k, v]; }));
+const [file, base, key] = args.filter((a) => !a.startsWith('--'));
 if (!file || !base || !key) {
-  console.error('Usage : node scripts/import.mjs <fichier.json|.csv> <url-du-worker> <INGEST_KEY>');
+  console.error('Usage : node scripts/import.mjs <fichier> <url-du-worker> <clé> [--after=ISO] [--before=ISO]');
   process.exit(1);
 }
+const bound = (v) => { if (v === undefined) return undefined; const t = Date.parse(v); if (!Number.isFinite(t)) { console.error(`Date invalide : ${v}`); process.exit(1); } return t; };
+const range = { after: bound(opts.after), before: bound(opts.before) };
 
-export function parseCsv(text) {
-  const lines = text.replace(/^﻿/, '').split(/\r?\n/).filter((l) => l.trim());
-  const sep = lines[0].split(';').length > lines[0].split(',').length ? ';' : ',';
-  const split = (line) => {
-    const out = []; let cur = '', q = false;
-    for (let i = 0; i < line.length; i++) {
-      const c = line[i];
-      if (c === '"') { if (q && line[i + 1] === '"') { cur += '"'; i++; } else q = !q; }
-      else if (c === sep && !q) { out.push(cur); cur = ''; }
-      else cur += c;
-    }
-    out.push(cur);
-    return out;
-  };
-  const head = split(lines[0]).map((h) => h.trim().toLowerCase());
-  const iv = head.indexOf('variable'), ix = head.indexOf('value'), it = head.indexOf('time');
-  if (iv < 0 || ix < 0 || it < 0) throw new Error('Colonnes variable, value et time introuvables : ' + head.join(', '));
-  return lines.slice(1).map(split).map((r) => ({ variable: r[iv], value: r[ix], time: r[it] }));
-}
-
-const text = readFileSync(file, 'utf8');
-let rows;
-if (file.toLowerCase().endsWith('.csv')) rows = parseCsv(text);
-else { const j = JSON.parse(text); rows = Array.isArray(j) ? j : j.result; }
-rows = rows.filter((r) => r && r.variable && r.value !== '' && r.value != null);
+const { items, skipped, outOfRange, noTime } = parseExport(readFileSync(file, 'utf8'), file, range);
+console.log(`${items.length} éléments à envoyer` + (outOfRange ? `, ${outOfRange} hors période ignorés` : '') + (noTime ? `, ${noTime} sans heure ignorés` : '') + (skipped ? `, ${skipped} vides ignorés` : ''));
+if (!items.length) process.exit(0);
 
 const url = base.replace(/\/$/, '') + '/ingest';
-const CHUNK = 500;
-let stored = 0, dup = 0, bad = 0;
-for (let i = 0; i < rows.length; i += CHUNK) {
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'Device-Token': key },
-    body: JSON.stringify(rows.slice(i, i + CHUNK).map((r) => ({ variable: r.variable, value: r.value, time: r.time }))),
-  });
+const CHUNK = 200;
+let stored = 0, dup = 0, bad = 0, failed = 0;
+for (let i = 0; i < items.length; i += CHUNK) {
+  const res = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', 'Device-Token': key }, body: JSON.stringify(items.slice(i, i + CHUNK)) });
   const out = await res.json().catch(() => ({}));
-  if (!res.ok && res.status !== 422) { console.error(`Échec HTTP ${res.status} : ${out.message || ''}`); process.exit(1); }
+  if (res.status === 422) { failed += Math.min(CHUNK, items.length - i); continue; }   // lot sans aucune mesure reconnue
+  if (!res.ok) { console.error(`\nÉchec HTTP ${res.status} : ${out.message || ''}`); process.exit(1); }
   stored += out.stored || 0; dup += out.duplicates || 0; bad += out.ignored || 0;
-  process.stdout.write(`\r${Math.min(i + CHUNK, rows.length)} / ${rows.length}`);
+  process.stdout.write(`\r${Math.min(i + CHUNK, items.length)} / ${items.length}`);
 }
-console.log(`\nTerminé : ${stored} ajoutés, ${dup} déjà présents, ${bad} ignorés.`);
+console.log(`\nTerminé : ${stored} relevés ajoutés, ${dup} déjà présents, ${bad} champs ignorés` + (failed ? `, ${failed} éléments non reconnus (aucune mesure)` : '') + '.');

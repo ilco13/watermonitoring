@@ -109,6 +109,16 @@ node scripts/import.mjs export.json https://eau.<votre-sous-domaine>.workers.dev
 
 Cela peut être relancé sans risque : les relevés déjà présents sont ignorés. Vos variables TagoIO s'appelaient `index_eau_1` et `index_eau_2`, comme ici.
 
+### Combler un trou d'historique avec Live Objects (facultatif)
+
+Live Objects conserve lui aussi les messages reçus (rubrique « Données » du portail, ou l'API de recherche `POST /api/v0/data/search/hits` avec une clé d'API en lecture). Exportez les messages du compteur sur la période manquante, puis :
+
+```bash
+node scripts/import.mjs messages.json https://eau.<votre-sous-domaine>.workers.dev <INGEST_KEY> --before=2026-10-01T01:30:00Z
+```
+
+Le script lit les messages Live Objects (JSON, lignes JSON ou CSV) comme les exports TagoIO. **Limitez toujours la période** (`--after` / `--before`) à ce qui manque : TagoIO note l'heure de réception, quelques secondes après l'heure du compteur que note Live Objects, donc importer deux sources pour la même période créerait des quasi-doublons. Relancer le même import est sans risque.
+
 ### Mise à jour automatique à chaque `git push` (facultatif)
 
 Dans Cloudflare : Workers & Pages → Create → Import a repository → ce dépôt. Commande de déploiement : `npx wrangler deploy`. Les secrets se définissent dans Settings → Variables and Secrets du Worker.
