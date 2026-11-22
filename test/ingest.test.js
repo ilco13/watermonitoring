@@ -74,3 +74,23 @@ test('Adeunis Pulse : genericSensor, message direct, imbriqué, ou en texte JSON
   assert.equal(r.points.length, 0);
   assert.equal(r.ignored, 2);
 });
+
+test('message Live Objects réel (Adeunis Pulse, connecteur lwm2m)', () => {
+  const msg = {
+    metadata: { connector: 'lwm2m', source: 'urn:lo:nsid:imei:355025930044829', group: { path: '/', id: 'root' }, network: { lwm2m: { ep: 'urn:imei:355025930044829' } } },
+    streamId: 'urn:lo:nsid:imei:355025930044829', created: '2026-11-22T09:29:22.772Z', extra: {}, location: null,
+    model: 'twin_json', id: '6b02b5f25e4a241fdf9bc24d',
+    value: { genericSensor: { 0: { sensorValue: 1574894 }, 1: { sensorValue: 668411 } } },
+    timestamp: '2026-11-22T09:29:19Z', tags: [],
+  };
+  const r = parseIngest(msg, NOW);
+  // l'heure retenue est celle du compteur (timestamp), pas celle de réception par Live Objects (created)
+  assert.deepEqual(r.points, [
+    { variable: 'index_eau_1', ts: Date.parse('2026-11-22T09:29:19Z'), value: 1574894 },
+    { variable: 'index_eau_2', ts: Date.parse('2026-11-22T09:29:19Z'), value: 668411 },
+  ]);
+  assert.equal(r.ignored, 0);
+  // même message sans "timestamp" : repli sur "created"
+  const { timestamp, ...noTs } = msg;
+  assert.equal(parseIngest(noTs, NOW).points[0].ts, Date.parse('2026-11-22T09:29:22.772Z'));
+});
