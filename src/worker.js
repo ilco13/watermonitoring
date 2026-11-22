@@ -8,6 +8,7 @@
  *   GET  /api/data      lectures d'une variable (utilisé par le tableau de bord)
  *   GET  /api/variables variables connues + dernière valeur
  *   GET  /api/events    derniers messages bruts reçus (diagnostic)
+ *   GET/POST/DELETE /api/readings   liste, ajout/correction, suppression d'un relevé (saisie manuelle)
  *   GET  /api/status    sonde
  *   tout le reste       fichiers de public/ (intégrés au Worker)
  *
@@ -85,8 +86,73 @@ async function handleIngest(request, url, env) {
   return json({ ok: true, received: points.length, stored, duplicates: points.length - stored, ignored });
 }
 
+const VARIABLE_RE = /^[A-Za-z0-9_.-]{1,80}$/;
+const MIN_TS = Date.UTC(2000, 0, 1);
+
+/**
+ * Les écritures passent par l'authentification du navigateur (Basic), envoyée automatiquement :
+ * sans garde-fou, un site tiers pourrait faire écrire à l'insu de l'utilisateur (CSRF). On exige donc
+ * un en-tête personnalisé (bloqué en cross-origin sans CORS) et, s'il est présent, un Origin identique.
+ */
+function writeAllowed(request, url) {
+  if (request.headers.get('X-Requested-With') !== 'eau-dashboard') return false;
+  const origin = request.headers.get('Origin');
+  if (origin && new URL(origin).host !== url.host) return false;
+  return true;
+}
+
+async function handleReadings(request, url, env) {
+  if (request.method === 'GET') {
+    const vars = (url.searchParams.get('variables') || '').split(',').filter(Boolean).slice(0, 6);
+    if (!vars.length || !vars.every((v) => VARIABLE_RE.test(v))) return json({ status: false, message: 'Paramètre variables invalide' }, 400);
+    const src = url.searchParams.get('source');
+    const limit = Math.min(200, Math.max(1, Number(url.searchParams.get('limit')) || 50));
+    const offset = Math.max(0, Number(url.searchParams.get('offset')) || 0);
+    const marks = vars.map(() => '?').join(',');
+    const sql = `SELECT variable, ts, value, source FROM readings WHERE variable IN (${marks})`
+      + (src === 'manual' || src === 'auto' ? ' AND source = ?' : '') + ' ORDER BY ts DESC, variable LIMIT ? OFFSET ?';
+    const binds = [...vars, ...(src === 'manual' || src === 'auto' ? [src] : []), limit, offset];
+    const { results } = await env.DB.prepare(sql).bind(...binds).all();
+    return json({ status: true, result: results.map((r) => ({ variable: r.variable, time: new Date(r.ts).toISOString(), value: r.value, source: r.source })) });
+  }
+
+  if (!writeAllowed(request, url)) return json({ status: false, message: 'Requête refusée' }, 403);
+
+  if (request.method === 'POST') {
+    let b;
+    try { b = await request.json(); } catch { return json({ status: false, message: 'JSON invalide' }, 400); }
+    const ts = Date.parse(b && b.time), value = Number(b && b.value);
+    if (!b || !VARIABLE_RE.test(String(b.variable)) || !Number.isFinite(ts) || !Number.isFinite(value)) {
+      return json({ status: false, message: 'variable, time et value requis' }, 400);
+    }
+    if (ts < MIN_TS || ts > Date.now() + 2 * 864e5) return json({ status: false, message: 'Date hors limites' }, 400);
+    if (value < 0 || value > 1e12) return json({ status: false, message: 'Valeur hors limites' }, 400);
+    const stmts = [];
+    if (b.replaces) {
+      const old = Date.parse(b.replaces);
+      if (!Number.isFinite(old)) return json({ status: false, message: 'replaces invalide' }, 400);
+      stmts.push(env.DB.prepare('DELETE FROM readings WHERE variable = ? AND ts = ?').bind(b.variable, old));
+    }
+    stmts.push(env.DB.prepare(
+      `INSERT INTO readings (variable, ts, value, source) VALUES (?, ?, ?, 'manual')
+       ON CONFLICT (variable, ts) DO UPDATE SET value = excluded.value, source = 'manual'`).bind(b.variable, ts, value));
+    await env.DB.batch(stmts);
+    return json({ status: true });
+  }
+
+  if (request.method === 'DELETE') {
+    const variable = url.searchParams.get('variable'), ts = Date.parse(url.searchParams.get('time') || '');
+    if (!VARIABLE_RE.test(String(variable)) || !Number.isFinite(ts)) return json({ status: false, message: 'variable et time requis' }, 400);
+    const res = await env.DB.prepare('DELETE FROM readings WHERE variable = ? AND ts = ?').bind(variable, ts).run();
+    return json({ status: true, deleted: res.meta.changes || 0 });
+  }
+  return json({ status: false, message: 'Méthode non autorisée' }, 405);
+}
+
 async function handleApi(request, url, env) {
   const p = url.pathname;
+  if (p === '/api/readings') return handleReadings(request, url, env);
+  if (request.method !== 'GET') return json({ status: false, message: 'Méthode non autorisée' }, 405);
   if (p === '/api/status') return json({ ok: true });
 
   if (p === '/api/data') {
@@ -144,10 +210,7 @@ export default {
         status: 401, headers: { 'WWW-Authenticate': 'Basic realm="Consommation eau", charset="UTF-8"' },
       });
     }
-    if (url.pathname.startsWith('/api/')) {
-      if (request.method !== 'GET') return json({ status: false, message: 'Méthode non autorisée' }, 405);
-      return handleApi(request, url, env);
-    }
+    if (url.pathname.startsWith('/api/')) return handleApi(request, url, env);
     return serveAsset(request, url);
   },
 };

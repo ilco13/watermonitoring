@@ -180,3 +180,33 @@ test('part estimée : relevés manuels espacés vs relevés toutes les 2 h', () 
   assert.ok(share[0] > 0.99 && share[1] > 0.99, 'janvier et février : estimés');
   assert.ok(share[3] < 0.01 && share[4] < 0.01, 'avril et mai : mesurés');
 });
+
+test('périodes calendaires : jour, semaine (lundi), mois ; glissantes ancrées sur le dernier relevé', () => {
+  const wed = at(2026, 11, 18, 15, 40); // mercredi
+  const day = WM.edgesCalendar(wed, 'day');
+  assert.equal(day.length, 13);
+  assert.equal(day[0], at(2026, 11, 18)); assert.equal(day[12], at(2026, 11, 19));
+  const week = WM.edgesCalendar(wed, 'week');
+  assert.equal(week.length, 8);
+  assert.equal(week[0], at(2026, 11, 16)); assert.equal(new Date(week[0]).getDay(), 1); // lundi
+  assert.equal(week[7], at(2026, 11, 23));
+  const month = WM.edgesCalendar(wed, 'month');
+  assert.equal(month.length, 31); // 30 jours en novembre + borne finale
+  assert.equal(month[0], at(2026, 11, 1)); assert.equal(month[30], at(2026, 12, 1));
+  assert.equal(WM.edgesCalendar(at(2026, 2, 10), 'month').length, 29);           // février 2026 : 28 jours
+  assert.equal(WM.edgesCalendar(at(2026, 3, 29, 12), 'day').length, 13);          // jour de passage à l'heure d'été
+  assert.ok(WM.edgesCalendar(at(2026, 3, 29, 12), 'day').every((x, i, a) => i === 0 || x > a[i - 1]));
+  // dimanche : la semaine commence bien le lundi précédent
+  assert.equal(WM.edgesCalendar(at(2026, 11, 22, 9), 'week')[0], at(2026, 11, 16));
+  const roll = WM.edgesRolling(wed, 7, 24 * H);
+  assert.equal(roll.length, 8); assert.equal(roll[7], wed); assert.equal(roll[0], wed - 7 * 24 * H);
+});
+
+test('fenêtres glissantes du résumé : 24 h, 7 jours, 30 jours', () => {
+  const now = at(2026, 6, 15, 12);
+  const r = constantFlow(at(2026, 4, 1), now, 10); // 240 L / jour
+  const s = WM.summarize(r, WM.toIntervals(r), now);
+  assert.ok(Math.abs(s.roll24 - 240) < 1);
+  assert.ok(Math.abs(s.roll7 - 7 * 240) < 1);
+  assert.ok(Math.abs(s.roll30 - 30 * 240) < 1);
+});

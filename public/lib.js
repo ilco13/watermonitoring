@@ -92,6 +92,7 @@
   const addDays = (ms, n) => { const d = new Date(ms); d.setDate(d.getDate() + n); return d.getTime(); };
   const startOfMonth = (ms) => { const d = new Date(ms); return new Date(d.getFullYear(), d.getMonth(), 1).getTime(); };
   const addMonths = (ms, n) => { const d = new Date(ms); return new Date(d.getFullYear(), d.getMonth() + n, 1).getTime(); };
+  const startOfWeek = (ms) => { const d = new Date(startOfDay(ms)); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return d.getTime(); }; // lundi 00:00
   const startOfYear = (ms) => new Date(new Date(ms).getFullYear(), 0, 1).getTime();
   const addYears = (ms, n) => new Date(new Date(ms).getFullYear() + n, 0, 1).getTime();
 
@@ -103,6 +104,32 @@
     const edges = [last];
     for (let i = 1; i <= n; i++) edges.unshift(add(last, -i));
     return edges;
+  }
+
+  /**
+   * Périodes calendaires qui contiennent `ms` :
+   *   'day'   aujourd'hui, 12 tranches de 2 h ; 'week' lundi à dimanche, 7 jours ; 'month' le mois en cours, un jour par case.
+   * Les cases à venir sont vides : le graphique montre la période entière.
+   */
+  function edgesCalendar(ms, kind) {
+    const edges = [];
+    if (kind === 'day') {
+      const d = new Date(startOfDay(ms));
+      for (let i = 0; i <= 12; i++) edges.push(new Date(d.getFullYear(), d.getMonth(), d.getDate(), 2 * i).getTime());
+    } else if (kind === 'week') {
+      const s = startOfWeek(ms);
+      for (let i = 0; i <= 7; i++) edges.push(addDays(s, i));
+    } else {
+      const first = startOfMonth(ms), next = addMonths(first, 1);
+      for (let t = first; t < next; t = addDays(t, 1)) edges.push(t);
+      edges.push(next);
+    }
+    return edges;
+  }
+
+  /** `n` cases de `stepMs` qui se terminent exactement à `anchor` (périodes glissantes, ancrées sur le dernier relevé). */
+  function edgesRolling(anchor, n, stepMs) {
+    return Array.from({ length: n + 1 }, (_, i) => anchor - (n - i) * stepMs);
   }
 
   /** Bornes de 2 h (heure locale) couvrant les `n` dernières tranches jusqu'à ms inclus. */
@@ -148,7 +175,9 @@
     const days = bucketize(intervals, dailyEdges); // 14 derniers jours dont aujourd'hui
     const prev7 = days.slice(6, 13); // 7 jours complets avant aujourd'hui
     const avg7 = prev7.reduce((s, x) => s + x, 0) / 7;
-    const last7 = total(intervals, addDays(day0, -6), ref + 1);
+    const roll24 = total(intervals, ref - DAY, ref);
+    const roll7 = total(intervals, ref - 7 * DAY, ref);
+    const roll30 = total(intervals, ref - 30 * DAY, ref);
 
     const month = total(intervals, mon0, ref + 1);
     const prevMonthSame = total(intervals, addMonths(mon0, -1), addMonths(mon0, -1) + (ref - mon0));
@@ -162,7 +191,7 @@
 
     return {
       lastT: last.t, indexL: last.v,
-      today, yesterday, avg7, last7,
+      today, yesterday, avg7, roll24, roll7, roll30,
       month, monthVs: monthComparable ? pct(month, prevMonthSame) : null, prevMonthSame,
       year, yearVs: yearComparable ? pct(year, prevYearSame) : null, prevYearSame,
       spark: bucketize(intervals, edgesBack(ref, 30, 'day')),
@@ -295,8 +324,8 @@
 
   return {
     H, DAY, toReadings, toIntervals, bucketize, estimatedShare, total,
-    startOfDay, addDays, startOfMonth, addMonths, startOfYear, addYears,
-    edgesBack, edgesHours, summarize, evaluateAlerts, weeklyProfile, median,
+    startOfDay, addDays, startOfMonth, addMonths, startOfYear, addYears, startOfWeek,
+    edgesBack, edgesHours, edgesCalendar, edgesRolling, summarize, evaluateAlerts, weeklyProfile, median,
     fmtVolume, fmtDuration, fmtTime, pct,
   };
 });

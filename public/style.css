@@ -122,7 +122,8 @@ button, select, input { font: inherit; color: inherit; }
 .chip[aria-pressed="false"] .dot { background: transparent !important; border: 2px solid var(--text-muted); }
 .chip .tot { color: var(--text-secondary); font-size: 13px; }
 .chartwrap { position: relative; height: 340px; }
-.opts { display: flex; gap: 12px; align-items: center; }
+.opts { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.range-note { margin: 0 0 6px; min-height: 1.2em; }
 .opts label { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; color: var(--text-secondary); cursor: pointer; }
 
 table.data { width: 100%; border-collapse: collapse; font-size: 14px; }
@@ -164,3 +165,23 @@ legend { padding: 0 6px; font-weight: 650; }
 @media (forced-colors: active) {
   .dot { border: 2px solid CanvasText; }
 }
+
+/* Édition des relevés */
+#readings { width: min(880px, calc(100vw - 24px)); }
+.dlg-body { padding: 18px; display: grid; gap: 14px; }
+.dlg-body h2, .dlg-body h3 { margin: 0; }
+.dlg-body h3 { font-size: 15px; }
+#rd-form { display: grid; gap: 12px; border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+.rd-filters { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+.rd-filters label { display: inline-flex; gap: 6px; align-items: center; color: var(--text-secondary); }
+.rd-filters select { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 5px 8px; }
+.rd-msg { margin: 0; color: var(--text-secondary); }
+.rd-msg.err { color: var(--critical); font-weight: 600; }
+.rd-actions { white-space: nowrap; }
+.btn.small { padding: 3px 9px; font-size: 13px; }
+#rd-list-box { max-height: 340px; }
+#rd-list-box table td { vertical-align: middle; }
+
+#rd-form .grid2 { align-items: end; }
+#rd-list-box table { min-width: 640px; }
+#rd-list-box table td:first-child { white-space: nowrap; }

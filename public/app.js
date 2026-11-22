@@ -33,7 +33,7 @@
 
   let cfg = loadCfg();
   let mode = 'demo'; // 'server' (Worker Cloudflare + D1) | 'demo'
-  const state = { data: {}, tab: 'd30', stacked: false, hidden: new Set(), asTable: false, heatMeter: 0, loadedAt: 0, errors: [], hint: '' };
+  const state = { data: {}, tab: 'm', mode: 'roll', stacked: false, hidden: new Set(), asTable: false, heatMeter: 0, loadedAt: 0, errors: [], hint: '' };
   let chart = null;
   let timer = null;
 
@@ -168,7 +168,9 @@
         ${sparkSvg(s.spark, m)}
         <dl class="stats">
           ${row('Hier', WM.fmtVolume(s.yesterday))}
-          ${row('7 jours', WM.fmtVolume(s.last7))}
+          ${row('24 h glissantes', WM.fmtVolume(s.roll24))}
+          ${row('7 jours glissants', WM.fmtVolume(s.roll7))}
+          ${row('30 jours glissants', WM.fmtVolume(s.roll30))}
           ${row('Ce mois', WM.fmtVolume(s.month), fmtDelta(s.monthVs) && fmtDelta(s.monthVs) + ' vs mois préc.')}
           ${row('Cette année', WM.fmtVolume(s.year), fmtDelta(s.yearVs) && fmtDelta(s.yearVs) + ' vs N−1')}
         </dl></article>`;
@@ -179,30 +181,62 @@
 
   function chartSpec() {
     const now = Date.now();
+    const H = WM.H, DAY = WM.DAY;
     const fmt = (o) => (t) => new Date(t).toLocaleString('fr-FR', o);
-    let edges, label, longLabel;
+    const lastT = Math.max(0, ...cfg.meters.map((m) => (state.data[m.id].readings.slice(-1)[0] || { t: 0 }).t));
+    const anchor = lastT || now;             // les périodes glissantes se terminent au dernier relevé
+    const roll = state.mode === 'roll';
+    const hm = fmt({ hour: '2-digit', minute: '2-digit' });
+    const dayLong = fmt({ weekday: 'long', day: 'numeric', month: 'long' });
+    const dayShort = fmt({ weekday: 'short', day: 'numeric', month: 'short' });
+    const dm = fmt({ day: 'numeric', month: 'short' });
+    const range = (a, b) => `du ${dayShort(a)} ${hm(a)} au ${dayShort(b)} ${hm(b)}`;
+    let edges, label, longLabel, note = '';
     switch (state.tab) {
-      case 'h48': edges = WM.edgesHours(now, 24, 2); label = fmt({ weekday: 'short', hour: 'numeric' });
-        longLabel = (a, b) => `${fmt({ weekday: 'long', day: 'numeric', month: 'short' })(a)}, ${fmt({ hour: '2-digit' })(a)} → ${fmt({ hour: '2-digit' })(b)}`; break;
+      case 'd':
+        if (roll) {
+          edges = WM.edgesRolling(anchor, 12, 2 * H); label = (a) => hm(a);
+          longLabel = (a, b) => `${dayShort(a)} ${hm(a)} → ${hm(b)}`; note = `24 h jusqu'au relevé de ${dayShort(anchor)} ${hm(anchor)}`;
+        } else {
+          edges = WM.edgesCalendar(now, 'day'); label = fmt({ hour: 'numeric' });
+          longLabel = (a, b) => `${dayLong(a)}, ${fmt({ hour: '2-digit' })(a)} → ${fmt({ hour: '2-digit' })(b)}`; note = `Aujourd'hui, ${dayLong(now)}`;
+        }
+        break;
+      case 'w':
+        if (roll) {
+          edges = WM.edgesRolling(anchor, 7, DAY); label = (a, b) => dm(b);
+          longLabel = range; note = `7 jours jusqu'au relevé de ${dayShort(anchor)} ${hm(anchor)}`;
+        } else {
+          edges = WM.edgesCalendar(now, 'week'); label = fmt({ weekday: 'short', day: 'numeric' });
+          longLabel = (a) => dayLong(a); note = `Semaine du ${fmt({ day: 'numeric', month: 'long' })(edges[0])} au ${fmt({ day: 'numeric', month: 'long' })(edges[7] - 1)}`;
+        }
+        break;
+      case 'm':
+        if (roll) {
+          edges = WM.edgesRolling(anchor, 30, DAY); label = (a, b) => dm(b);
+          longLabel = range; note = `30 jours jusqu'au relevé de ${dayShort(anchor)} ${hm(anchor)}`;
+        } else {
+          edges = WM.edgesCalendar(now, 'month'); label = fmt({ day: 'numeric' });
+          longLabel = (a) => dayLong(a); note = fmt({ month: 'long', year: 'numeric' })(edges[0]);
+        }
+        break;
       case 'd90': edges = WM.edgesBack(now, 90, 'day'); label = fmt({ day: 'numeric', month: 'short' });
         longLabel = (a) => fmt({ weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })(a); break;
       case 'm12': edges = WM.edgesBack(now, 12, 'month'); label = fmt({ month: 'short', year: '2-digit' });
         longLabel = (a) => fmt({ month: 'long', year: 'numeric' })(a); break;
-      case 'y': {
+      default: { // 'y'
         const first = Math.min(...cfg.meters.map((m) => (state.data[m.id].readings[0] || { t: now }).t));
         const n = new Date(now).getFullYear() - new Date(first).getFullYear() + 1;
         edges = WM.edgesBack(now, Math.max(n, 1), 'year'); label = fmt({ year: 'numeric' });
-        longLabel = (a) => fmt({ year: 'numeric' })(a); break;
+        longLabel = (a) => fmt({ year: 'numeric' })(a);
       }
-      default: edges = WM.edgesBack(now, 30, 'day'); label = fmt({ day: 'numeric', month: 'short' });
-        longLabel = (a) => fmt({ weekday: 'long', day: 'numeric', month: 'long' })(a);
     }
-    const labels = edges.slice(0, -1).map(label);
-    const full = edges.slice(0, -1).map((a, i) => longLabel(a, edges[i + 1]));
-    const lastT = Math.max(0, ...cfg.meters.map((m) => (state.data[m.id].readings.slice(-1)[0] || { t: 0 }).t));
-    const open = edges.slice(0, -1).map((a, i) => edges[i + 1] > lastT && a <= lastT); // période en cours
+    const starts = edges.slice(0, -1);
+    const labels = starts.map((a, i) => label(a, edges[i + 1]));
+    const full = starts.map((a, i) => longLabel(a, edges[i + 1]));
+    const open = starts.map((a, i) => edges[i + 1] > lastT && a <= lastT); // période en cours
     const series = cfg.meters.map((m) => ({ m, raw: WM.bucketize(state.data[m.id].intervals, edges), est: WM.estimatedShare(state.data[m.id].intervals, edges) }));
-    return { labels, full, open, series };
+    return { labels, full, open, series, note };
   }
 
   function renderChart() {
@@ -215,6 +249,9 @@
       return `<button type="button" class="chip" data-meter="${m.id}" aria-pressed="${!state.hidden.has(m.id)}"><span class="dot" style="background:${colorVar(m)}"></span>${esc(m.name)}<span class="tot num">${WM.fmtVolume(tot)}</span></button>`;
     }).join('');
     document.querySelectorAll('#tabs button').forEach((b) => b.setAttribute('aria-selected', b.dataset.tab === state.tab));
+    $('#mode-seg').hidden = !['d', 'w', 'm'].includes(state.tab);
+    document.querySelectorAll('#mode-seg button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === state.mode)));
+    $('#range-note').textContent = spec.note;
     document.querySelectorAll('#stack-seg button').forEach((b) => b.setAttribute('aria-pressed', String((b.dataset.stack === '1') === state.stacked)));
 
     $('#chartwrap').hidden = state.asTable;
@@ -373,6 +410,151 @@
     dlg.showModal();
   }
 
+  /* ---------- Édition des relevés (ajout, correction, suppression) ---------- */
+
+  const rd = { source: 'manual', meter: 'all', edit: null, rows: [], more: false, msg: '', err: false };
+  const fmtFull = (ms) => new Date(ms).toLocaleString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const rawToM3 = (m, raw) => raw * m.litresPerUnit / 1000;
+  const fmtM3 = (m, raw) => new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 3, maximumFractionDigits: 3 }).format(rawToM3(m, raw)) + ' m³';
+  const toLocalInput = (ms) => new Date(ms - new Date(ms).getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  const meterByVar = (v) => cfg.meters.find((m) => m.variable === v);
+
+  async function apiWrite(method, params, body) {
+    const q = params ? '?' + new URLSearchParams(params) : '';
+    const res = await fetch('api/readings' + q, {
+      method, cache: 'no-store', body: body ? JSON.stringify(body) : undefined,
+      headers: { 'X-Requested-With': 'eau-dashboard', 'Content-Type': 'application/json' },
+    });
+    let j = null; try { j = await res.json(); } catch (e) { /* corps vide */ }
+    if (!res.ok || (j && j.status === false)) throw new Error((j && j.message) || `HTTP ${res.status}`);
+    return j;
+  }
+
+  function setRdMsg(text, err) {
+    rd.msg = text; rd.err = !!err;
+    const el = $('#rd-msg'); if (el) { el.textContent = text; el.className = 'rd-msg small' + (err ? ' err' : ''); el.hidden = !text; }
+  }
+
+  function renderRdForm() {
+    const e = rd.edit;
+    const fields = cfg.meters.map((m) => {
+      const mine = e && e.variable === m.variable;
+      const last = state.data[m.id] && state.data[m.id].readings.slice(-1)[0];
+      const val = mine ? Number(rawToM3(m, e.raw).toFixed(3)) : '';
+      return `<div class="field"><label for="rd-v-${m.id}"><span class="dot" style="background:${colorVar(m)}"></span> Index ${esc(m.name)} (m³)</label>
+        <input id="rd-v-${m.id}" name="v_${m.id}" type="text" inputmode="decimal" autocomplete="off" placeholder="ex. 1299,7" ${e && !mine ? 'disabled' : ''} value="${String(val).replace('.', ',')}">
+        <span class="hint">${last ? `dernier relevé : ${fmtIndex(last.v)} (${fmtDateTime(last.t)})` : ''}</span></div>`;
+    }).join('');
+    $('#rd-form-box').innerHTML = `<form id="rd-form" autocomplete="off">
+      <h3>${e ? 'Modifier un relevé' : 'Ajouter un relevé manuel'}</h3>
+      <div class="grid2">
+        <div class="field"><label for="rd-when">Date et heure</label><input id="rd-when" name="when" type="datetime-local" required value="${toLocalInput(e ? e.ms : Date.now())}"></div>
+        ${fields}
+      </div>
+      <div class="dlg-actions">${e ? '<button class="btn" type="button" data-rd-cancel>Annuler la modification</button>' : ''}
+        <button class="btn primary" type="submit">${e ? 'Enregistrer la modification' : 'Ajouter'}</button></div>
+      <p id="rd-msg" class="rd-msg small" hidden></p></form>`;
+    setRdMsg(rd.msg, rd.err);
+  }
+
+  async function submitRd(ev) {
+    ev.preventDefault();
+    const f = new FormData(ev.target), e = rd.edit;
+    const whenStr = String(f.get('when')), typed = new Date(whenStr).getTime();
+    if (!Number.isFinite(typed)) return setRdMsg('Date invalide.', true);
+    const ts = e && whenStr === toLocalInput(e.ms) ? e.ms : typed; // l'heure n'est pas touchée (secondes) si elle n'a pas été modifiée
+    const entries = cfg.meters.filter((m) => !(e && e.variable !== m.variable))
+      .map((m) => ({ m, str: String(f.get('v_' + m.id) ?? '').replace(/[\s\u00a0\u202f]/g, '').replace(',', '.') })).filter((x) => x.str !== '');
+    if (!entries.length) return setRdMsg('Saisissez au moins un index.', true);
+    const warnings = [], posts = [];
+    for (const { m, str } of entries) {
+      const v = Number(str);
+      if (!/^\d+(\.\d+)?$/.test(str) || !Number.isFinite(v) || v < 0) return setRdMsg(`Index ${m.name} invalide : saisissez un nombre en m³ (ex. 1299,7).`, true);
+      const litres = Math.round(v * 1000), raw = litres / m.litresPerUnit;
+      const ownTs = e && e.variable === m.variable ? e.ms : null;
+      const others = state.data[m.id].readings.filter((r) => r.t !== ownTs);
+      const prev = [...others].reverse().find((r) => r.t < ts), next = others.find((r) => r.t > ts);
+      if (prev && litres < prev.v) warnings.push(`${m.name} : ${fmtIndex(litres)} est inférieur au relevé précédent (${fmtIndex(prev.v)}, ${fmtDateTime(prev.t)}).`);
+      if (next && litres > next.v) warnings.push(`${m.name} : ${fmtIndex(litres)} est supérieur au relevé suivant (${fmtIndex(next.v)}, ${fmtDateTime(next.t)}).`);
+      posts.push({ variable: m.variable, time: new Date(ts).toISOString(), value: raw, replaces: ownTs !== null ? e.time : undefined });
+    }
+    if (ts > Date.now() + 3600e3) warnings.push('La date est dans le futur.');
+    if (warnings.length && !window.confirm(warnings.join('\n') + '\n\nEnregistrer quand même ?')) return;
+    try { for (const body of posts) await apiWrite('POST', null, body); }
+    catch (err) { return setRdMsg('Échec : ' + err.message, true); }
+    rd.edit = null;
+    setRdMsg(`${posts.length} relevé${posts.length > 1 ? 's' : ''} enregistré${posts.length > 1 ? 's' : ''}.`, false);
+    await afterWrite();
+  }
+
+  async function afterWrite() {
+    const msg = rd.msg, err = rd.err;
+    await loadAll(); renderAll(); renderRdForm(); setRdMsg(msg, err); await loadRdList(false);
+  }
+
+  async function loadRdList(append) {
+    const box = $('#rd-list-box');
+    const vars = (rd.meter === 'all' ? cfg.meters : cfg.meters.filter((m) => m.id === rd.meter)).map((m) => m.variable);
+    const offset = append ? rd.rows.length : 0;
+    try {
+      const params = { variables: vars.join(','), limit: 50, offset };
+      if (rd.source !== 'all') params.source = rd.source;
+      const page = await apiGet('readings', params);
+      rd.rows = append ? rd.rows.concat(page) : page; rd.more = page.length === 50;
+    } catch (e) { box.innerHTML = `<p class="rd-msg small err">Lecture impossible : ${esc(e.message)}</p>`; return; }
+    box.innerHTML = `<table class="data num"><thead><tr><th>Date et heure</th><th>Compteur</th><th>Index</th><th>Origine</th><th></th></tr></thead><tbody>${
+      rd.rows.map((r, i) => { const m = meterByVar(r.variable); return `<tr><td>${esc(fmtFull(Date.parse(r.time)))}</td>
+        <td>${m ? `<span class="who"><span class="dot" style="background:${colorVar(m)}"></span>${esc(m.name)}</span>` : esc(r.variable)}</td>
+        <td>${m ? fmtM3(m, r.value) : esc(r.value)}</td><td>${r.source === 'manual' ? 'manuel' : 'auto'}</td>
+        <td class="rd-actions">${m ? `<button class="btn small" type="button" data-rd-edit="${i}">Modifier</button> ` : ''}<button class="btn small" type="button" data-rd-del="${i}">Supprimer</button></td></tr>`; }).join('')
+    }</tbody></table>${rd.rows.length ? '' : '<p class="muted small">Aucun relevé pour ce filtre.</p>'}${rd.more ? '<p><button class="btn" type="button" data-rd-more>Afficher plus</button></p>' : ''}`;
+  }
+
+  function openReadings() {
+    const dlg = $('#readings');
+    if (mode !== 'server') {
+      dlg.innerHTML = '<form method="dialog"><h2>Relevés</h2><p>La saisie n\'est pas disponible en mode démonstration : la page n\'est pas reliée à la base de données.</p><div class="dlg-actions"><button class="btn primary">Fermer</button></div></form>';
+      dlg.showModal(); return;
+    }
+    rd.edit = null; rd.msg = ''; rd.err = false;
+    dlg.innerHTML = `<div class="dlg-body"><h2>Relevés</h2>
+      <p class="small muted">Ajoutez un relevé relu sur le compteur, corrigez une erreur ou supprimez un relevé. Les index se saisissent en m³ (ex. 1 299,7). Les totaux se recalculent aussitôt.</p>
+      <div id="rd-form-box"></div>
+      <div class="rd-filters"><h3>Relevés enregistrés</h3>
+        <label class="small">Origine <select id="rd-source"><option value="manual">Manuels</option><option value="auto">Automatiques</option><option value="all">Tous</option></select></label>
+        <label class="small">Compteur <select id="rd-meter"><option value="all">Les deux</option>${cfg.meters.map((m) => `<option value="${m.id}">${esc(m.name)}</option>`).join('')}</select></label></div>
+      <div id="rd-list-box" class="tablewrap"></div>
+      <div class="dlg-actions"><button class="btn" type="button" data-rd-close>Fermer</button></div></div>`;
+    $('#rd-source').value = rd.source; $('#rd-meter').value = rd.meter;
+    renderRdForm(); loadRdList(false); dlg.showModal();
+  }
+
+  function setupReadings() {
+    const dlg = $('#readings');
+    dlg.addEventListener('submit', (e) => { if (e.target.id === 'rd-form') submitRd(e); });
+    dlg.addEventListener('change', (e) => {
+      if (e.target.id === 'rd-source') { rd.source = e.target.value; loadRdList(false); }
+      if (e.target.id === 'rd-meter') { rd.meter = e.target.value; loadRdList(false); }
+    });
+    dlg.addEventListener('click', async (e) => {
+      const b = e.target.closest('button'); if (!b) return;
+      if ('rdClose' in b.dataset) dlg.close();
+      else if ('rdCancel' in b.dataset) { rd.edit = null; rd.msg = ''; renderRdForm(); }
+      else if ('rdMore' in b.dataset) loadRdList(true);
+      else if (b.dataset.rdEdit !== undefined) {
+        const r = rd.rows[Number(b.dataset.rdEdit)]; if (!r) return;
+        rd.edit = { variable: r.variable, time: r.time, ms: Date.parse(r.time), raw: r.value }; rd.msg = '';
+        renderRdForm(); $('#rd-form').scrollIntoView({ block: 'nearest' });
+      } else if (b.dataset.rdDel !== undefined) {
+        const r = rd.rows[Number(b.dataset.rdDel)]; if (!r) return;
+        const m = meterByVar(r.variable);
+        if (!window.confirm(`Supprimer ce relevé ?\n\n${fmtFull(Date.parse(r.time))}\n${m ? m.name + ' : ' + fmtM3(m, r.value) : r.variable}\n\nCette action est définitive.`)) return;
+        try { await apiWrite('DELETE', { variable: r.variable, time: r.time }); setRdMsg('Relevé supprimé.', false); await afterWrite(); }
+        catch (err) { setRdMsg('Échec : ' + err.message, true); }
+      }
+    });
+  }
+
   /* ---------- Infobulle du profil horaire ---------- */
 
   function setupTip() {
@@ -419,10 +601,13 @@
     matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => renderChart());
     $('#btn-refresh').onclick = async () => { $('#status').textContent = 'Actualisation…'; await loadAll(); renderAll(); };
     $('#btn-settings').onclick = openSettings;
+    $('#btn-readings').onclick = openReadings;
+    setupReadings();
     document.addEventListener('click', (e) => {
       const t = e.target.closest('button'); if (!t) return;
       if (t.hasAttribute('data-open-settings')) openSettings();
       else if (t.dataset.tab) { state.tab = t.dataset.tab; renderChart(); }
+      else if (t.dataset.mode) { state.mode = t.dataset.mode; renderChart(); }
       else if (t.dataset.meter) { state.hidden.has(t.dataset.meter) ? state.hidden.delete(t.dataset.meter) : state.hidden.add(t.dataset.meter); renderChart(); }
       else if (t.dataset.stack != null) { state.stacked = t.dataset.stack === '1'; renderChart(); }
       else if (t.dataset.heat != null) { state.heatMeter = Number(t.dataset.heat); renderHeat(); }

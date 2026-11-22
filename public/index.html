@@ -17,6 +17,7 @@
     <div class="actions">
       <button class="btn" id="btn-refresh" type="button">Actualiser</button>
       <button class="btn" id="btn-theme" type="button" title="Thème">Thème : auto</button>
+      <button class="btn" id="btn-readings" type="button">Relevés</button>
       <button class="btn" id="btn-settings" type="button">Réglages</button>
     </div>
   </header>
@@ -34,8 +35,9 @@
     <div class="panel-head">
       <h2 id="h-conso">Consommation</h2>
       <div class="tabs" role="tablist" id="tabs" aria-label="Période">
-        <button role="tab" data-tab="h48" aria-selected="false">48 h</button>
-        <button role="tab" data-tab="d30" aria-selected="true">30 jours</button>
+        <button role="tab" data-tab="d" aria-selected="false">24 h</button>
+        <button role="tab" data-tab="w" aria-selected="false">Semaine</button>
+        <button role="tab" data-tab="m" aria-selected="true">Mois</button>
         <button role="tab" data-tab="d90" aria-selected="false">90 jours</button>
         <button role="tab" data-tab="m12" aria-selected="false">12 mois</button>
         <button role="tab" data-tab="y" aria-selected="false">Années</button>
@@ -44,6 +46,10 @@
     <div class="toolbar">
       <div class="legend" id="legend" aria-label="Compteurs affichés"></div>
       <div class="opts">
+        <div class="seg" id="mode-seg" aria-label="Type de période">
+          <button type="button" data-mode="cal" aria-pressed="false">Calendaire</button>
+          <button type="button" data-mode="roll" aria-pressed="true">Glissant</button>
+        </div>
         <div class="seg" id="stack-seg" aria-label="Disposition">
           <button type="button" data-stack="0" aria-pressed="true">Côte à côte</button>
           <button type="button" data-stack="1" aria-pressed="false">Empilé</button>
@@ -51,6 +57,7 @@
         <label><input type="checkbox" id="as-table"> Tableau</label>
       </div>
     </div>
+    <p id="range-note" class="small muted range-note"></p>
     <div class="chartwrap" id="chartwrap"><canvas id="chart" role="img" aria-label="Histogramme de consommation"></canvas></div>
     <p id="est-note" class="small muted" hidden>Barres claires : périodes estimées à partir de relevés manuels espacés (consommation répartie uniformément, sans les vrais pics).</p>
     <div class="tablewrap" id="tablewrap" hidden></div>
@@ -73,6 +80,7 @@
 
 <div id="tip" role="tooltip"></div>
 <dialog id="settings"></dialog>
+<dialog id="readings"></dialog>
 
 <script src="vendor/chart.umd.js"></script>
 <script src="lib.js"></script>
