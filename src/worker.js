@@ -475,6 +475,7 @@ export default {
 
     // l'icône est publique : elle doit s'afficher dans l'onglet même avant la connexion
     if (url.pathname === '/icone.png') return serveAsset(request, url, env);
+    if (url.pathname === '/favicon.ico') return serveAsset(request, new URL('/icone.png', url), env);   // les navigateurs la demandent d'office
 
     const cookie = getCookie(request, SESSION_COOKIE);
     const session = cookie ? await verify(cookie, env.SSO_SECRET, 'eau-session') : null;
