@@ -206,6 +206,8 @@
    * cfg : { dailyLimitL, monthlyLimitL, maxFlowLph, leakHours, baseFlowRatio, baseFlowMinLph, spikeRatio, staleHours }
    * (0 / vide = règle désactivée)
    *  - leakHours : écoulement sans le moindre arrêt (utile si le compteur s'arrête normalement, ex. arrosage)
+   *  - quietFromH / quietToH / quietMaxL : plage horaire locale (ex. 6 → 18) pendant laquelle ce compteur ne devrait
+   *    pas consommer (arrosage de nuit) ; alerte si une tranche entièrement dans la plage dépasse quietMaxL litres
    *  - baseFlowRatio / baseFlowMinLph : « débit de fond » (le plus petit débit des dernières 24 h) supérieur à
    *    ratio × sa valeur habituelle (médiane des minima des 14 jours précédents) ET d'au moins baseFlowMinLph L/h
    *    de plus. Adapté à un compteur qui ne s'arrête jamais vraiment (réseau d'une ASL).
@@ -255,6 +257,18 @@
       }
       if (run >= cfg.leakHours * H) {
         out.push({ level: 'serious', code: 'leak', text: `Fuite possible : l'eau coule sans interruption depuis ${fmtDuration(run)} (débit minimum ${minFlow < 10 ? minFlow.toFixed(1) : Math.round(minFlow)} L/h).` });
+      }
+    }
+    if (cfg.quietMaxL > 0 && cfg.quietToH > cfg.quietFromH) {
+      const tod = (ms) => { const d = new Date(ms); return d.getHours() + d.getMinutes() / 60 + d.getSeconds() / 3600; };
+      const sameDay = (a, b) => new Date(a).toDateString() === new Date(b).toDateString();
+      const hits = intervals.filter((iv) => iv.t1 > lastT - DAY && !iv.reset && iv.d > cfg.quietMaxL
+        && iv.t1 - iv.t0 >= MIN_FLOW_SPAN && sameDay(iv.t0, iv.t1)
+        && tod(iv.t0) >= cfg.quietFromH - 0.01 && tod(iv.t1) <= cfg.quietToH + 0.01);
+      if (hits.length) {
+        const worst = hits.reduce((m, iv) => (iv.d > m.d ? iv : m));
+        const hm = (ms) => new Date(ms).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+        out.push({ level: 'serious', code: 'quiet', text: `Consommation en journée : ${fmtVolume(worst.d)} entre ${hm(worst.t0)} et ${hm(worst.t1)}${hits.length > 1 ? ` (et ${hits.length - 1} autre${hits.length > 2 ? 's' : ''} tranche${hits.length > 2 ? 's' : ''} sur 24 h)` : ''}, alors que ce compteur ne consomme normalement pas entre ${cfg.quietFromH} h et ${cfg.quietToH} h. Fuite ou arrosage hors horaire ?` });
       }
     }
     if (cfg.baseFlowRatio > 0) {

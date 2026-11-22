@@ -7,16 +7,16 @@
 
   /* ---------- Configuration (stockée dans ce navigateur) ---------- */
 
-  const CFG_KEY = 'wm.config.v3';
+  const CFG_KEY = 'wm.config.v4';
   const DEFAULT_CFG = {
     historyYears: 3,
     refreshMin: 10,
     // index_eau_1 = voie 0 (genericSensor "0") = eau potable ; index_eau_2 = voie 1 = arrosage ; index en litres
     meters: [
       { id: 'potable', name: 'Eau potable', variable: 'index_eau_1', litresPerUnit: 1, slot: 1,
-        alerts: { dailyLimitL: 4000, monthlyLimitL: 0, maxFlowLph: 1500, leakHours: 0, baseFlowRatio: 2, baseFlowMinLph: 20, spikeRatio: 2.5, staleHours: 6 } },
+        alerts: { dailyLimitL: 4000, monthlyLimitL: 0, maxFlowLph: 1500, leakHours: 0, quietFromH: 0, quietToH: 0, quietMaxL: 0, baseFlowRatio: 2, baseFlowMinLph: 20, spikeRatio: 2.5, staleHours: 6 } },
       { id: 'arrosage', name: 'Arrosage', variable: 'index_eau_2', litresPerUnit: 1, slot: 2,
-        alerts: { dailyLimitL: 3000, monthlyLimitL: 0, maxFlowLph: 1500, leakHours: 12, baseFlowRatio: 0, baseFlowMinLph: 0, spikeRatio: 0, staleHours: 6 } },
+        alerts: { dailyLimitL: 3000, monthlyLimitL: 0, maxFlowLph: 1500, leakHours: 12, quietFromH: 6, quietToH: 18, quietMaxL: 10, baseFlowRatio: 0, baseFlowMinLph: 0, spikeRatio: 0, staleHours: 6 } },
     ],
   };
 
@@ -345,6 +345,9 @@
           <div class="field"><label>Seuil mensuel (L)</label><input name="monthlyLimitL" type="number" min="0" value="${m.alerts.monthlyLimitL}"></div>
           <div class="field"><label>Débit moyen max. sur 2 h (L/h)</label><input name="maxFlowLph" type="number" min="0" value="${m.alerts.maxFlowLph}"></div>
           <div class="field"><label>Fuite : écoulement continu depuis (h)</label><input name="leakHours" type="number" min="0" value="${m.alerts.leakHours}"><span class="hint">0 = désactivé. Pour un compteur qui s'arrête normalement (arrosage).</span></div>
+          <div class="field"><label>Plage sans consommation normale : de (h)</label><input name="quietFromH" type="number" min="0" max="24" step="0.5" value="${m.alerts.quietFromH}"><span class="hint">Ex. 6 à 18 pour un arrosage de nuit. Laisser le seuil à 0 pour désactiver.</span></div>
+          <div class="field"><label>… à (h)</label><input name="quietToH" type="number" min="0" max="24" step="0.5" value="${m.alerts.quietToH}"></div>
+          <div class="field"><label>… alerte si une tranche dépasse (L)</label><input name="quietMaxL" type="number" min="0" value="${m.alerts.quietMaxL}"></div>
           <div class="field"><label>Débit de fond : × la normale</label><input name="baseFlowRatio" type="number" step="0.1" min="0" value="${m.alerts.baseFlowRatio}"><span class="hint">0 = désactivé. Pour un compteur qui ne s'arrête jamais (eau potable).</span></div>
           <div class="field"><label>… et au moins (L/h) de plus</label><input name="baseFlowMinLph" type="number" min="0" value="${m.alerts.baseFlowMinLph}"></div>
           <div class="field"><label>Jour anormal : × la médiane</label><input name="spikeRatio" type="number" step="0.1" min="0" value="${m.alerts.spikeRatio}"><span class="hint">0 = désactivé</span></div>
@@ -379,7 +382,7 @@
       const v = (n) => fs.querySelector(`[name="${n}"]`).value;
       m.name = v('name').trim() || m.name; m.variable = v('variable').trim();
       m.litresPerUnit = Number(v('litresPerUnit')) || 1;
-      for (const k of ['dailyLimitL', 'monthlyLimitL', 'maxFlowLph', 'leakHours', 'baseFlowRatio', 'baseFlowMinLph', 'spikeRatio', 'staleHours']) m.alerts[k] = Number(v(k)) || 0;
+      for (const k of ['dailyLimitL', 'monthlyLimitL', 'maxFlowLph', 'leakHours', 'quietFromH', 'quietToH', 'quietMaxL', 'baseFlowRatio', 'baseFlowMinLph', 'spikeRatio', 'staleHours']) m.alerts[k] = Number(v(k)) || 0;
     });
     return next;
   }

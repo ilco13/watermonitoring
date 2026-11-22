@@ -210,3 +210,33 @@ test('fenêtres glissantes du résumé : 24 h, 7 jours, 30 jours', () => {
   assert.ok(Math.abs(s.roll7 - 7 * 240) < 1);
   assert.ok(Math.abs(s.roll30 - 30 * 240) < 1);
 });
+
+test('plage sans consommation : arrosage de nuit, une consommation en journée est suspecte', () => {
+  const now = at(2026, 6, 15, 15, 0);
+  const cfg = { quietFromH: 6, quietToH: 18, quietMaxL: 20, staleHours: 6 };
+  // arrosage normal : 22 h -> 0 h (100 L / 2 h), rien le jour
+  const mk = (extraAt) => {
+    const r = []; let v = 0;
+    for (let t = now - 48 * H; t <= now; t += 2 * H) {
+      const h = new Date(t).getHours();
+      v += (h === 22 ? 100 : 0) + (extraAt && t === extraAt ? 60 : 0);
+      r.push({ t, v });
+    }
+    return { r, iv: null };
+  };
+  const codes = (x) => WM.evaluateAlerts(cfg, x.r, WM.toIntervals(x.r), now).map((a) => a.code);
+  assert.ok(!codes(mk(null)).includes('quiet'), 'arrosage nocturne normal : pas d\'alerte');
+  // 60 L pendant la tranche de 13 h à 15 h, dans les 24 h -> alerte
+  const big = mk(now - 2 * H); // tranche 13h -> 15h, entièrement dans la plage
+  assert.ok(codes(big).includes('quiet'), 'consommation de 60 L entre 13 h et 15 h : alerte');
+  const al = WM.evaluateAlerts(cfg, big.r, WM.toIntervals(big.r), now).find((a) => a.code === 'quiet');
+  assert.equal(al.level, 'serious');
+  // sous le seuil (3 L) : ignoré ; règle désactivée si quietMaxL = 0
+  const small = []; { let v = 0; for (let t = now - 48 * H; t <= now; t += 2 * H) { v += t === now - 2 * H ? 3 : 0; small.push({ t, v }); } }
+  assert.ok(!WM.evaluateAlerts(cfg, small, WM.toIntervals(small), now).some((a) => a.code === 'quiet'));
+  assert.ok(!WM.evaluateAlerts({ ...cfg, quietMaxL: 0 }, big.r, WM.toIntervals(big.r), now).some((a) => a.code === 'quiet'));
+  // une tranche qui déborde de la plage (17 h -> 19 h, début de l'arrosage) n'est pas une alerte
+  const edge = []; { let v = 0; const n2 = at(2026, 6, 15, 19, 30); for (let t = n2 - 48 * H; t <= n2; t += 2 * H) { v += new Date(t).getHours() === 19 ? 150 : 0; edge.push({ t, v }); } // relevé de 19 h 30 : consommation entre 17 h 30 et 19 h 30
+
+    assert.ok(!WM.evaluateAlerts(cfg, edge, WM.toIntervals(edge), n2).some((a) => a.code === 'quiet'), 'tranche à cheval sur 18 h : ignorée'); }
+});
