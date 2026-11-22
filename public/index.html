@@ -24,12 +24,16 @@
   <div class="top-actions">
     <div class="top-tools">
       <button class="btn ghost icon" id="btn-refresh" type="button" title="Actualiser les données" aria-label="Actualiser les données">↻</button>
-      <button class="btn ghost" id="btn-readings" type="button">Relevés</button>
-      <button class="btn ghost" id="btn-settings" type="button">Réglages</button>
+      <button class="btn ghost" id="btn-readings" type="button">Données</button>
+      <button class="gear" id="btn-settings" type="button" title="Paramètres" aria-label="Paramètres">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        <span class="gear-label">Paramètres</span>
+      </button>
+      <button class="help-btn" id="btn-help" type="button" title="Aide" aria-label="Aide">?</button>
     </div>
     <div class="top-user">
       <a class="who" id="who" href="{{ASL_URL}}/mon-compte" data-sync-theme title="Mon compte"></a>
-      <button class="btn ghost" id="btn-logout" type="button" hidden>Déconnexion</button>
+      <button class="linkout" id="btn-logout" type="button" hidden>Déconnexion</button>
     </div>
   </div>
   <button class="theme-btn" id="btn-theme" type="button" title="Changer de thème" aria-label="Changer de thème">
@@ -104,7 +108,7 @@
     <div class="panel-head">
       <div>
         <h2 id="h-heat">Profil horaire moyen</h2>
-        <div class="small muted">Litres par tranche de 2 h, moyenne sur les 4 dernières semaines. Une fuite se voit en cases colorées la nuit.</div>
+        <div class="small muted" id="heat-hint">Litres par tranche de 2 h, moyenne sur les 4 dernières semaines.</div>
       </div>
       <div class="seg" id="heat-seg" aria-label="Compteur"></div>
     </div>
@@ -119,6 +123,7 @@
 
 <div id="tip" role="tooltip"></div>
 <dialog id="settings"></dialog>
+<dialog id="help"></dialog>
 <dialog id="readings"></dialog>
 
 <script src="vendor/chart.umd.js"></script>

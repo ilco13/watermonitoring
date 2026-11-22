@@ -114,7 +114,7 @@ export function buildMail(events, now, siteUrl) {
   for (const e of events.filter((x) => x.type === 'resolved')) block('RÉTABLIE', e, `Elle était active depuis ${WM.fmtDuration(now - e.since)}. Texte de la dernière alerte ci-dessus.`);
   lines.push(`Détail et graphiques : ${siteUrl}/#synthese`);
   lines.push('');
-  lines.push("— Message automatique du suivi de l'eau, envoyé au bureau. Seuils et envoi des mails : « Réglages » du site (réservé au bureau).");
+  lines.push("— Message automatique du suivi de l'eau, envoyé au bureau. Seuils et envoi des mails : « Paramètres » du site (réservé au bureau).");
   return { subject, body: lines.join('\n') };
 }
 
@@ -170,7 +170,7 @@ async function loadStates(env) {
   return new Map(results.map((r) => [r.key, r]));
 }
 
-/** Alertes en cours (toutes, pour l'écran Réglages) et mails qui partiraient maintenant, sans rien envoyer. */
+/** Alertes en cours (toutes, pour l'écran Paramètres) et mails qui partiraient maintenant, sans rien envoyer. */
 export async function previewAlerts(env, now = Date.now()) {
   const { cfg, byVar } = await loadAlertInputs(env, now);
   const active = evaluate(cfg, byVar, now);
@@ -227,7 +227,7 @@ export async function alertStatus(env) {
   return { enabled, last, tracked: results };
 }
 
-/** Mail de test (bouton des Réglages) : vérifie toute la chaîne jusqu'à la file de l'ASL. */
+/** Mail de test (bouton des Paramètres) : vérifie toute la chaîne jusqu'à la file de l'ASL. */
 export async function sendTestMail(env, by, now = Date.now()) {
   const body = [`Ceci est un mail de test du suivi de l'eau, demandé par ${by} le ${fmtStamp(now)}.`, '',
     'S\'il vous parvient, les alertes critiques et importantes arriveront de la même façon.', '',

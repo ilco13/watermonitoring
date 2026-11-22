@@ -29,7 +29,7 @@ Le décodage reprend celui de votre ancien parseur TagoIO : le message Live Obje
 
 Le message peut être l'objet Live Objects lui-même, ou sa version texte JSON dans un champ `value` (comme dans votre parseur). Le format TagoIO (`[{"variable":…,"value":…,"time":…}]`) et les messages dont l'objet `value` contient des champs numériques sont aussi acceptés. L'heure est celle du message (`timestamp`, `time` ou `created`), à défaut l'heure de réception. Les messages rejoués par Live Objects sont ignorés (pas de doublons).
 
-Les variables associées à chaque compteur se changent dans Réglages.
+Les variables associées à chaque compteur se changent dans Paramètres (l'engrenage).
 
 ## Connexion et rôles
 
@@ -85,7 +85,7 @@ L'adresse est du type `https://eau.<votre-sous-domaine>.workers.dev` ; celle de 
 
 ### Régénérer la clé de Live Objects (bureau)
 
-**Réglages → Clé de réception Live Objects → Régénérer la clé…** (réservé au bureau). La nouvelle clé s'affiche **une seule fois** (bouton « Copier ») ; le site n'en conserve que l'empreinte SHA-256. L'ancienne clé (la clé d'origine, ou la précédente) reste valable **24 heures** pour laisser le temps de remplacer la valeur de l'en-tête `Device-Token` dans l'action HTTPS push de Live Objects. L'écran indique pour chaque clé sa date, son auteur et sa dernière utilisation : on voit ainsi quand Live Objects a basculé. La clé d'origine (secret `INGEST_KEY`) fonctionne tant qu'aucune clé n'a été régénérée, puis expire 24 h après la première régénération.
+**Paramètres → Paramètres techniques → Clé de réception Live Objects → Régénérer la clé…** (réservé au bureau). La nouvelle clé s'affiche **une seule fois** (bouton « Copier ») ; le site n'en conserve que l'empreinte SHA-256. L'ancienne clé (la clé d'origine, ou la précédente) reste valable **24 heures** pour laisser le temps de remplacer la valeur de l'en-tête `Device-Token` dans l'action HTTPS push de Live Objects. L'écran indique pour chaque clé sa date, son auteur et sa dernière utilisation : on voit ainsi quand Live Objects a basculé. La clé d'origine (secret `INGEST_KEY`) fonctionne tant qu'aucune clé n'a été régénérée, puis expire 24 h après la première régénération.
 
 ### Côté Live Objects
 
@@ -128,8 +128,8 @@ Dans Cloudflare : Workers & Pages → Create → Import a repository → ce dép
 - **Les relevés sont conservés sans limite de durée** : le site ne supprime jamais un relevé (seule la copie brute des 200 derniers messages reçus est purgée). La base D1 gratuite accepte 500 Mo ; ce site en consomme environ 0,5 Mo par an.
 - **Quota de lectures** : le plan gratuit limite à 5 millions de lignes lues par jour, et les requêtes échouent une fois le plafond atteint (jusqu'à minuit UTC ; les données ne sont pas touchées). Après un premier chargement complet, le tableau de bord ne redemande donc que les dernières 24 h à chaque actualisation, et refait un chargement complet toutes les 24 h, après chaque modification manuelle et au clic sur ↻.
 - **Retour en arrière** : « Time Travel » de Cloudflare permet de restaurer la base à un instant précis, mais seulement sur **7 jours avec le plan gratuit** (30 jours avec le plan payant) : `npx wrangler d1 time-travel restore eau --timestamp=2026-11-22T12:00:00Z`.
-- **Sauvegarde automatique dans R2** : chaque lundi à 03:17 UTC, un CSV complet est écrit dans le bucket privé `eau-sauvegardes` (`hebdo/releves-AAAA-MM-JJ.csv`), puis relu pour vérifier sa taille ; il pèse environ 130 Ko, soit 7 Mo par an, et n'est jamais supprimé. *Réglages → Sauvegarde des relevés* affiche la dernière sauvegarde (ou l'erreur) et propose « Sauvegarder maintenant » (`manuel/…`). Mise en place : activer R2 dans le tableau de bord Cloudflare, `npx wrangler r2 bucket create eau-sauvegardes --location weur`, puis `npm run deploy` (liaison `BACKUPS` et cron dans `wrangler.jsonc`). Pour restaurer : télécharger le fichier depuis R2 puis `node scripts/import.mjs …`.
-- **Copie hors Cloudflare** : *Réglages → Sauvegarde des relevés → Télécharger tous les relevés (CSV)* (bureau). Le fichier (`variable,time,value,source`) se réimporte avec `node scripts/import.mjs releves-eau-AAAA-MM-JJ.csv https://eau.<votre-sous-domaine>.workers.dev <clé>` : la restauration redonne les mêmes relevés, origine auto ou manuelle comprise. À faire de temps en temps, par exemple tous les trimestres.
+- **Sauvegarde automatique dans R2** : chaque lundi à 03:17 UTC, un CSV complet est écrit dans le bucket privé `eau-sauvegardes` (`hebdo/releves-AAAA-MM-JJ.csv`), puis relu pour vérifier sa taille ; il pèse environ 130 Ko, soit 7 Mo par an, et n'est jamais supprimé. *Paramètres → Paramètres techniques → Sauvegarde des relevés* affiche la dernière sauvegarde (ou l'erreur) et propose « Sauvegarder maintenant » (`manuel/…`). Mise en place : activer R2 dans le tableau de bord Cloudflare, `npx wrangler r2 bucket create eau-sauvegardes --location weur`, puis `npm run deploy` (liaison `BACKUPS` et cron dans `wrangler.jsonc`). Pour restaurer : télécharger le fichier depuis R2 puis `node scripts/import.mjs …`.
+- **Copie hors Cloudflare** : *Paramètres → Paramètres techniques → Sauvegarde des relevés → Télécharger tous les relevés (CSV)* (bureau). Le fichier (`variable,time,value,source`) se réimporte avec `node scripts/import.mjs releves-eau-AAAA-MM-JJ.csv https://eau.<votre-sous-domaine>.workers.dev <clé>` : la restauration redonne les mêmes relevés, origine auto ou manuelle comprise. À faire de temps en temps, par exemple tous les trimestres.
 
 ## Sans Cloudflare : aperçu seul
 

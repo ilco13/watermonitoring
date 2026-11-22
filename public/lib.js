@@ -361,16 +361,40 @@
 
   /* ---------- Profil horaire (jour de semaine × tranche de 2 h) ---------- */
 
-  /** Moyenne de litres par tranche de 2 h, sur les `weeks` dernières semaines. Lundi = ligne 0. */
-  function weeklyProfile(intervals, ref, weeks) {
+  /**
+   * Décalage (0, 30, 60 ou 90 minutes) à donner aux tranches de 2 h du profil pour qu'elles tombent entre deux relevés :
+   * le compteur envoie un index à heure fixe (par exemple 10 h 29, 12 h 29…), donc une tranche mesurée va de 8 h 30 à 10 h 30.
+   * Calculé sur les derniers relevés automatiques (phase moyenne dans le cycle de 2 h, arrondie à 30 min) : suit le changement d'heure.
+   */
+  function heatOffset(readings) {
+    const auto = readings.filter((r) => r.src !== 'manual').slice(-24);
+    if (auto.length < 3) return 0;
+    let sx = 0, sy = 0;
+    for (const r of auto) {
+      const d = new Date(r.t), a = ((d.getHours() * 60 + d.getMinutes()) % 120) / 120 * 2 * Math.PI;
+      sx += Math.cos(a); sy += Math.sin(a);
+    }
+    if (Math.hypot(sx, sy) < auto.length * 0.5) return 0;     // pas de rythme régulier
+    let m = Math.atan2(sy, sx) / (2 * Math.PI) * 120;
+    if (m < 0) m += 120;
+    return (Math.round(m / 30) * 30) % 120;
+  }
+
+  /**
+   * Moyenne de litres par tranche de 2 h, sur les `weeks` dernières semaines. Lundi = ligne 0.
+   * offsetMin : décalage des tranches (voir heatOffset) ; la colonne c va de c×2 h + offset à c×2 h + offset + 2 h, le jour
+   * étant celui du début de la tranche (la dernière colonne peut déborder après minuit).
+   */
+  function weeklyProfile(intervals, ref, weeks, offsetMin) {
+    const off = (offsetMin || 0) * 60e3;
     const n = weeks * 7 * 12;
-    const edges = edgesHours(ref, n, 2);
+    const edges = edgesHours(ref - off, n, 2).map((e) => e + off);
     const b = bucketize(intervals, edges);
     const sums = Array.from({ length: 7 }, () => new Array(12).fill(0));
     const cnt = Array.from({ length: 7 }, () => new Array(12).fill(0));
     for (let i = 0; i < b.length; i++) {
       if (edges[i + 1] > ref) continue; // tranche en cours : incomplète, on ne la moyenne pas
-      const d = new Date(edges[i]);
+      const d = new Date(edges[i] - off);
       const row = (d.getDay() + 6) % 7, col = Math.floor(d.getHours() / 2);
       sums[row][col] += b[i]; cnt[row][col]++;
     }
@@ -419,7 +443,7 @@
     DEFAULT_CFG, mergeCfg,
     H, DAY, toReadings, toIntervals, bucketize, estimatedShare, total,
     startOfDay, addDays, startOfMonth, addMonths, startOfYear, addYears, startOfWeek,
-    edgesBack, edgesHours, edgesCalendar, edgesRolling, nextExpected, trendVsUsual, summarize, evaluateAlerts, weeklyProfile, median,
+    edgesBack, edgesHours, edgesCalendar, edgesRolling, nextExpected, trendVsUsual, summarize, evaluateAlerts, weeklyProfile, heatOffset, median,
     fmtVolume, fmtDuration, fmtTime, pct,
   };
 });

@@ -119,8 +119,8 @@
       try {
         const vars = await apiGet('variables', {});
         state.hint = vars.length
-          ? `Variables reçues : ${vars.map((v) => v.variable).join(', ')}. Corrigez le nom dans Réglages.`
-          : 'Aucun message reçu pour l\'instant : vérifiez l\'action Live Objects (README) puis ouvrez Réglages → Derniers messages reçus.';
+          ? `Variables reçues : ${vars.map((v) => v.variable).join(', ')}. Corrigez le nom dans Paramètres.`
+          : 'Aucun message reçu pour l\'instant : vérifiez l\'action Live Objects (README) puis ouvrez Paramètres → Réglages techniques → Variables et derniers messages reçus.';
       } catch (e) { /* ignoré */ }
     }
     state.loadedAt = Date.now();
@@ -149,7 +149,7 @@
     if (state.errors.length) { err = true; parts.push(`<span><strong>Lecture impossible.</strong> ${esc(state.errors.join(' · '))}${state.hint ? '<br>' + esc(state.hint) : ''}</span>`); }
     el.hidden = !parts.length;
     el.classList.toggle('err', err);
-    el.innerHTML = parts.join('') + (parts.length ? '<button class="btn" type="button" data-open-settings>Réglages</button>' : '');
+    el.innerHTML = parts.join('') + (parts.length ? '<button class="btn" type="button" data-open-settings>Paramètres</button>' : '');
   }
 
   function renderStatus() {
@@ -371,27 +371,38 @@
     const d = state.data[m.id];
     const el = $('#heat');
     if (!d || !d.readings.length) { el.innerHTML = ''; $('#heat-trend').innerHTML = ''; return; }
-    const prof = WM.weeklyProfile(d.intervals, d.readings[d.readings.length - 1].t, 4);
+    // Le conseil de lecture dépend du compteur : un arrosage de nuit se trahit par une consommation de JOUR, un réseau par une consommation de NUIT
+    const qa = m.alerts, quiet = qa.quietMaxL > 0 && qa.quietToH > qa.quietFromH;
+    const hint = quiet
+      ? `Une case colorée entre ${qa.quietFromH} h et ${qa.quietToH} h est suspecte : ce compteur ne consomme normalement pas à cette heure.`
+      : qa.baseFlowRatio > 0 ? 'Une fuite se voit en cases colorées la nuit, quand plus personne ne consomme.'
+        : 'Une case colorée à une heure où le compteur ne consomme normalement pas est suspecte.';
+    $('#heat-hint').textContent = `Litres par tranche de 2 h, moyenne sur les 4 dernières semaines. ${hint}`;  // complété plus bas si les tranches sont décalées
+    const off = WM.heatOffset(d.readings);                        // tranches décalées comme les relevés (ex. 16 h 30 – 18 h 30)
+    const hh = (min) => `${Math.floor(min / 60) % 24}h${min % 60 ? String(min % 60).padStart(2, '0') : ''}`;
+    if (off) $('#heat-hint').textContent += ` Les tranches sont décalées de ${off % 60 ? off + ' min' : off / 60 + ' h'} pour coïncider avec les relevés (par exemple ${hh(16 * 60 + off)} – ${hh(18 * 60 + off)}).`;
+    const slot = (c) => `${hh(c * 120 + off)}–${hh(c * 120 + off + 120)}`;
+    const prof = WM.weeklyProfile(d.intervals, d.readings[d.readings.length - 1].t, 4, off);
     const max = Math.max(1, ...prof.flat());
     const days = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
     const dayNames = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche'];
     const tr = WM.trendVsUsual(d.readings, d.intervals, 4);
     // case repérée : celle de la dernière tranche MESURÉE (le milieu de la tranche entre les deux derniers relevés), pas l'heure qu'il est
     const refT = tr ? (tr.t0 + tr.t1) / 2 : d.readings[d.readings.length - 1].t - 3600e3;
-    const ref = new Date(refT), nowRow = (ref.getDay() + 6) % 7, nowCol = Math.floor(ref.getHours() / 2);
+    const ref = new Date(refT - off * 60e3), nowRow = (ref.getDay() + 6) % 7, nowCol = Math.floor(ref.getHours() / 2);
     const vol = (x) => WM.fmtVolume(x);
     // pastille dans la case de la dernière mesure : le sens de la tendance (jamais la seule couleur)
     const tag = !tr || tr.level === 'unknown' ? ['●', 'ici']
       : tr.level === 'up' ? ['▲', `+${Math.round(tr.pct)} %`] : tr.level === 'down' ? ['▼', `−${Math.abs(Math.round(tr.pct))} %`]
         : tr.level === 'unusual' ? ['!', 'inhabituel'] : ['=', 'habituel'];
-    let html = '<div></div>' + Array.from({ length: 12 }, (_, i) => `<div class="h">${i % 2 === 0 ? i * 2 + 'h' : ''}</div>`).join('');
+    let html = '<div></div>' + Array.from({ length: 12 }, (_, i) => `<div class="h">${i % 2 === 0 ? hh(i * 120 + off) : ''}</div>`).join('');
     prof.forEach((row, r) => {
       html += `<div class="d">${days[r]}</div>`;
       row.forEach((val, c) => {
         const isNow = r === nowRow && c === nowCol;
         const pct = val <= 0 ? 0 : 10 + 90 * (val / max);
         const bg = val <= 0 ? 'color-mix(in srgb, var(--text-muted) 10%, var(--surface-1))' : `color-mix(in srgb, ${colorVar(m)} ${pct.toFixed(0)}%, var(--surface-1))`;
-        const lbl = `${days[r]} ${c * 2}h–${c * 2 + 2}h : ${vol(val)} en moyenne${isNow ? ' — dernière tranche mesurée' : ''}`;
+        const lbl = `${days[r]} ${slot(c)} : ${vol(val)} en moyenne${isNow ? ' — dernière tranche mesurée' : ''}`;
         html += `<div class="c${isNow ? ' now' : ''}" data-tip="${esc(lbl)}" style="background:${bg}" role="presentation">${isNow ? `<span class="nt"><b>${tag[0]}</b><span class="t"> ${esc(tag[1])}</span></span>` : ''}</div>`;
       });
     });
@@ -399,7 +410,7 @@
     $('#heat-scale').innerHTML = `0 <span class="bar" style="background:linear-gradient(90deg,color-mix(in srgb,var(--text-muted) 10%,var(--surface-1)),color-mix(in srgb,${colorVar(m)} 10%,var(--surface-1)),${colorVar(m)})"></span> ${vol(max)} par tranche de 2 h`;
 
     // texte de tendance : dernière tranche mesurée comparée à la même tranche, le même jour de la semaine, les semaines précédentes
-    let txt = `<strong>Dernière mesure</strong> : ${dayNames[nowRow]}, ${nowCol * 2} h–${nowCol * 2 + 2} h (case entourée). `;
+    let txt = `<strong>Dernière mesure</strong> : ${dayNames[nowRow]}, ${slot(nowCol).replace('–', ' – ')} (case entourée). `;
     if (!tr) txt += 'Pas encore assez de relevés récents pour comparer.';
     else {
       const win = `${fmtHm(tr.t0)} → ${fmtHm(tr.t1)}`, dn = dayNames[(new Date(tr.t1).getDay() + 6) % 7];
@@ -414,33 +425,88 @@
     $('#heat-trend').innerHTML = txt;
   }
 
-  /* ---------- Réglages ---------- */
+  /* ---------- Aide ---------- */
+
+  function openHelp() {
+    const dlg = $('#help');
+    const bureau = canEdit();
+    dlg.innerHTML = `<div class="dlg-body help-body"><h2>Aide</h2>
+      <h3>Les trois pages</h3>
+      <ul>
+        <li><strong>Synthèse</strong> : les alertes en cours, puis pour chaque compteur la consommation d'aujourd'hui, d'hier, de la semaine, du mois et de l'année. « Calendaire » compte depuis le début du jour, de la semaine (lundi), du mois, de l'année ; « Glissant » compte les dernières 24 h, 7 jours, 30 jours, 12 mois.</li>
+        <li><strong>Graphiques</strong> : la consommation par heure, jour, semaine, mois ou année, et l'index du compteur. Le signe « ≈ » ou une teinte plus claire signale une période seulement estimée, faute de relevés assez rapprochés.</li>
+        <li><strong>Profil horaire</strong> : la consommation moyenne de chaque tranche de 2 h, par jour de semaine (4 dernières semaines). La case entourée est celle de la <strong>dernière mesure</strong> ; la flèche dit si elle est plus forte (▲) ou plus faible (▼) que d'habitude. Selon le compteur : pour l'eau potable une fuite se voit en cases colorées la nuit ; pour l'arrosage (qui ne coule que la nuit) c'est une case colorée en journée qui est suspecte.</li>
+      </ul>
+      <h3>D'où viennent les chiffres</h3>
+      <p>Le compteur envoie son index toutes les 2 heures environ ; la consommation d'une période est calculée à partir de ces index, répartis au prorata du temps. Le prochain relevé attendu est indiqué en haut de page. Le bouton ↻ recharge les données.</p>
+      <h3>Les alertes</h3>
+      <ul>
+        <li><span class="pill critical"><i>×</i>Critique</span> : plus de relevé depuis longtemps, consommation du jour au-dessus du seuil, très gros débit.</li>
+        <li><span class="pill serious"><i>!</i>Important</span> : fuite possible (écoulement sans arrêt ou débit de fond anormal), consommation dans une plage où le compteur ne devrait pas consommer, consommation du mois au-dessus du seuil.</li>
+        <li><span class="pill warning"><i>!</i>Attention</span> : 80 % du seuil du jour, jour anormal, index en recul.</li>
+      </ul>
+      <p>Les alertes critiques et importantes sont aussi envoyées <strong>par mail au bureau</strong> (à l'apparition, rappel toutes les 24 h, puis au rétablissement).</p>
+      <h3>Réservé au bureau</h3>
+      <ul>
+        <li><strong>Données</strong> : ajouter un relevé fait à la main, corriger ou supprimer un relevé, et chercher un relevé par date.</li>
+        <li><strong>Paramètres</strong> (icône d'engrenage) : pour chaque compteur, son type (réseau ou arrosage), la consommation maximale par jour et le délai sans relevé ; les alertes par mail ; et, repliés, les réglages techniques : réception depuis Live Objects, clé de réception, sauvegardes et export CSV de tous les relevés.</li>
+      </ul>
+      <p class="small muted">${bureau ? 'Vous êtes membre du bureau : vous voyez ces deux boutons.' : 'Vous consultez le suivi : les boutons Données et Paramètres sont réservés au bureau.'} Le thème clair ou sombre se change avec le bouton rond en haut à droite ; il suit aussi le site de l'ASL.</p>
+      <div class="dlg-actions"><button class="btn primary" type="button" id="btn-help-close">Fermer</button></div></div>`;
+    $('#btn-help-close').onclick = () => dlg.close();
+    dlg.showModal();
+    dlg.scrollTop = 0;   // le bouton « Fermer » prend le focus : on remonte au titre
+  }
+
+  /* ---------- Paramètres ---------- */
 
   function settingsHtml() {
+    const num = (name, label, v, extra = '', hint = '') => `<div class="field"><label>${label}</label><input name="${name}" type="number" min="0" ${extra} value="${v}">${hint ? `<span class="hint">${hint}</span>` : ''}</div>`;
     const meterFs = cfg.meters.map((m, i) => `
-      <fieldset data-i="${i}"><legend><span class="dot" style="background:${colorVar(m)}"></span> ${esc(m.name)}</legend>
+      <fieldset data-i="${i}" class="meter-fs"><legend><span class="dot" style="background:${colorVar(m)}"></span> ${esc(m.name)}</legend>
+        <div class="field"><label>Nom</label><input name="name" value="${esc(m.name)}"></div>
+        <div class="field"><label>Type de compteur</label>
+          <select data-kind>
+            <option value="reseau">Réseau : l'eau ne s'arrête jamais (ex. eau potable)</option>
+            <option value="arrosage">Arrosage : s'arrête normalement (ex. arrosage de nuit)</option>
+            <option value="perso">Personnalisé (paramètres détaillés)</option>
+          </select>
+          <span class="hint" data-kind-hint></span></div>
         <div class="grid2">
-          <div class="field"><label>Nom</label><input name="name" value="${esc(m.name)}"></div>
-          <div class="field"><label>Variable de l'index</label><input name="variable" list="vars" value="${esc(m.variable)}"></div>
-          <div class="field"><label>Litres par unité d'index</label><input name="litresPerUnit" type="number" step="any" min="0" value="${m.litresPerUnit}"><span class="hint">1 : l'index du compteur est déjà en litres (cas du décodeur actuel). 1000 s'il est en m³.</span></div>
+          ${num('dailyLimitL', 'Consommation maximale par jour (L)', m.alerts.dailyLimitL, '', 'Alerte critique au-delà, « attention » à 80 %. 0 = pas de limite.')}
+          ${num('staleHours', 'Aucun relevé depuis (h)', m.alerts.staleHours, '', 'Alerte critique si le compteur ne répond plus. Il envoie un relevé toutes les 2 h.')}
+          <div class="field" data-quiet>${'<label>Pas de consommation de (h)</label>'}<input name="quietFromH" type="number" min="0" max="24" step="0.5" value="${m.alerts.quietFromH}"><span class="hint">Plage où l'arrosage ne doit pas couler, par exemple de 6 à 18.</span></div>
+          <div class="field" data-quiet><label>… à (h)</label><input name="quietToH" type="number" min="0" max="24" step="0.5" value="${m.alerts.quietToH}"></div>
         </div>
-        <div class="grid2">
-          <div class="field"><label>Seuil journalier (L)</label><input name="dailyLimitL" type="number" min="0" value="${m.alerts.dailyLimitL}"></div>
-          <div class="field"><label>Seuil mensuel (L)</label><input name="monthlyLimitL" type="number" min="0" value="${m.alerts.monthlyLimitL}"></div>
-          <div class="field"><label>Débit moyen max. sur 2 h (L/h)</label><input name="maxFlowLph" type="number" min="0" value="${m.alerts.maxFlowLph}"></div>
-          <div class="field"><label>Fuite : écoulement continu depuis (h)</label><input name="leakHours" type="number" min="0" value="${m.alerts.leakHours}"><span class="hint">0 = désactivé. Pour un compteur qui s'arrête normalement (arrosage).</span></div>
-          <div class="field"><label>Plage sans consommation normale : de (h)</label><input name="quietFromH" type="number" min="0" max="24" step="0.5" value="${m.alerts.quietFromH}"><span class="hint">Ex. 6 à 18 pour un arrosage de nuit. Laisser le seuil à 0 pour désactiver.</span></div>
-          <div class="field"><label>… à (h)</label><input name="quietToH" type="number" min="0" max="24" step="0.5" value="${m.alerts.quietToH}"></div>
-          <div class="field"><label>… alerte si une tranche dépasse (L)</label><input name="quietMaxL" type="number" min="0" value="${m.alerts.quietMaxL}"></div>
-          <div class="field"><label>Débit de fond : × la normale</label><input name="baseFlowRatio" type="number" step="0.1" min="0" value="${m.alerts.baseFlowRatio}"><span class="hint">0 = désactivé. Pour un compteur qui ne s'arrête jamais (eau potable).</span></div>
-          <div class="field"><label>… et au moins (L/h) de plus</label><input name="baseFlowMinLph" type="number" min="0" value="${m.alerts.baseFlowMinLph}"></div>
-          <div class="field"><label>Jour anormal : × la médiane</label><input name="spikeRatio" type="number" step="0.1" min="0" value="${m.alerts.spikeRatio}"><span class="hint">0 = désactivé</span></div>
-          <div class="field"><label>Alerte si aucun relevé depuis (h)</label><input name="staleHours" type="number" min="0" value="${m.alerts.staleHours}"></div>
-        </div>
+        <p class="rule-summary small" data-summary></p>
+        <details class="adv"><summary>Paramètres détaillés</summary>
+          <div class="grid2">
+            ${num('monthlyLimitL', 'Consommation maximale par mois (L)', m.alerts.monthlyLimitL, '', '0 = pas de limite.')}
+            ${num('maxFlowLph', 'Débit moyen maximal sur 2 h (L/h)', m.alerts.maxFlowLph, '', 'Alerte critique en cas de gros débit (rupture de tuyau).')}
+            ${num('leakHours', 'Fuite : écoulement continu depuis (h)', m.alerts.leakHours, '', '0 = désactivé. Pour un compteur qui s\'arrête normalement (arrosage).')}
+            ${num('quietMaxL', 'Plage ci-dessus : alerte si une tranche dépasse (L)', m.alerts.quietMaxL, '', '0 = désactivé.')}
+            ${num('baseFlowRatio', 'Débit de fond : × la normale', m.alerts.baseFlowRatio, 'step="0.1"', '0 = désactivé. Pour un compteur qui ne s\'arrête jamais (fuite lente).')}
+            ${num('baseFlowMinLph', '… et au moins (L/h) de plus', m.alerts.baseFlowMinLph)}
+            ${num('spikeRatio', 'Jour anormal : × la médiane', m.alerts.spikeRatio, 'step="0.1"', '0 = désactivé.')}
+          </div>
+          <div class="grid2">
+            <div class="field"><label>Variable de l'index</label><input name="variable" list="vars" value="${esc(m.variable)}"></div>
+            <div class="field"><label>Litres par unité d'index</label><input name="litresPerUnit" type="number" step="any" min="0" value="${m.litresPerUnit}"><span class="hint">1 : l'index du compteur est déjà en litres. 1000 s'il est en m³.</span></div>
+          </div>
+        </details>
       </fieldset>`).join('');
     return `<form method="dialog" id="settings-form">
-      <h2>Réglages</h2>
-      ${mode === 'server' ? '<p class="hint">Ces réglages s\'appliquent à tous les utilisateurs du site.</p>' : ''}
+      <h2>Paramètres</h2>
+      ${mode === 'server' ? '<p class="hint">Ces paramètres s\'appliquent à tous les utilisateurs du site.</p>' : ''}
+      ${meterFs}
+      ${mode === 'server' ? `<fieldset><legend>Alertes par mail</legend>
+        <p class="small">Le site recalcule les alertes toutes les heures. Les alertes <strong>critiques et importantes</strong> sont envoyées par mail au <strong>bureau</strong> (comptes « bureau » de l'ASL), via la messagerie Gmail de l'ASL : un mail à l'apparition, un rappel toutes les 24 h tant que l'alerte dure (3 au plus), un mail au rétablissement. Les alertes « attention » restent visibles sur la page seulement.</p>
+        <label class="check"><input type="checkbox" id="am-enabled"> Envoyer les alertes par mail au bureau</label>
+        <div id="am-box" class="small">Chargement…</div>
+        <div class="row-btns"><button class="btn" type="button" id="btn-am-test">Envoyer un mail de test</button> <button class="btn" type="button" id="btn-am-check">Contrôler maintenant</button></div>
+        <p class="hint">Les mails partent de la file d'attente de l'ASL : le script Gmail les envoie dans les 10 minutes.</p></fieldset>` : ''}
+      <details class="adv tech"><summary>Paramètres techniques : réception des données, clé, sauvegarde</summary>
+      <div class="stack">
       <fieldset><legend>Données reçues de Live Objects</legend>
         <div class="grid2">
           <div class="field"><label>Historique chargé (années)</label><input name="historyYears" type="number" min="1" max="10" value="${cfg.historyYears}"></div>
@@ -456,18 +522,63 @@
         <p class="small">Vous pouvez aussi garder une copie chez vous : le fichier CSV contient la variable, l'heure (UTC), la valeur en litres et l'origine (auto ou manuel).</p>
         <div><a class="btn" href="api/export.csv" download>Télécharger tous les relevés (CSV)</a></div>
         <p class="hint">Se réimporte avec <code>scripts/import.mjs</code> (voir le README). La restauration redonne les mêmes relevés, origine comprise.</p></fieldset>` : ''}
-      ${mode === 'server' ? `<fieldset><legend>Alertes par mail</legend>
-        <p class="small">Le site recalcule les alertes toutes les heures. Les alertes <strong>critiques et importantes</strong> sont envoyées par mail au <strong>bureau</strong> (comptes « bureau » de l'ASL), via la messagerie Gmail de l'ASL : un mail à l'apparition, un rappel toutes les 24 h tant que l'alerte dure (3 au plus), un mail au rétablissement. Les alertes « attention » restent visibles sur la page seulement.</p>
-        <label class="check"><input type="checkbox" id="am-enabled"> Envoyer les alertes par mail au bureau</label>
-        <div id="am-box" class="small">Chargement…</div>
-        <div class="row-btns"><button class="btn" type="button" id="btn-am-test">Envoyer un mail de test</button> <button class="btn" type="button" id="btn-am-check">Contrôler maintenant</button></div>
-        <p class="hint">Les mails partent de la file d'attente de l'ASL : le script Gmail les envoie dans les 10 minutes.</p></fieldset>` : ''}
-      ${meterFs}
+      </div></details>
       <div class="dlg-actions">
         <button class="btn" type="button" id="btn-reset">Valeurs par défaut</button>
         <button class="btn" type="button" id="btn-cancel">Annuler</button>
         <button class="btn primary" type="submit" value="save">Enregistrer</button>
       </div></form>`;
+  }
+
+  /* ---------- Réglages d'alerte simplifiés : un type de compteur, deux seuils, le détail repliable ---------- */
+
+  const KIND_PRESETS = {
+    reseau: { leakHours: 0, quietMaxL: 0, quietFromH: 0, quietToH: 0, baseFlowRatio: 2, baseFlowMinLph: 20, spikeRatio: 2.5 },
+    arrosage: { leakHours: 12, quietMaxL: 10, quietFromH: 6, quietToH: 18, baseFlowRatio: 0, baseFlowMinLph: 0, spikeRatio: 0 },
+  };
+  const KIND_HINT = {
+    reseau: 'On surveille le débit de fond (une fuite lente se voit à l\'eau qui ne descend jamais à zéro la nuit) et les jours anormaux.',
+    arrosage: 'On surveille l\'écoulement continu et toute consommation dans la plage interdite (par exemple en journée si l\'arrosage se fait la nuit).',
+    perso: 'Chaque règle est réglable dans « Paramètres détaillés ».',
+  };
+  function kindOf(a) {
+    if (a.leakHours === 0 && a.quietMaxL === 0 && a.baseFlowRatio > 0) return 'reseau';
+    if (a.baseFlowRatio === 0 && a.spikeRatio === 0 && (a.leakHours > 0 || a.quietMaxL > 0)) return 'arrosage';
+    return 'perso';
+  }
+  /** Phrase qui dit, en clair, ce qui est surveillé avec les réglages du formulaire. */
+  function ruleSummary(a) {
+    const L = (x) => WM.fmtVolume(x), r = [];
+    if (a.staleHours > 0) r.push(`aucun relevé depuis ${a.staleHours} h`);
+    if (a.dailyLimitL > 0) r.push(`plus de ${L(a.dailyLimitL)} par jour`);
+    if (a.monthlyLimitL > 0) r.push(`plus de ${L(a.monthlyLimitL)} par mois`);
+    if (a.maxFlowLph > 0) r.push(`débit supérieur à ${a.maxFlowLph} L/h`);
+    if (a.leakHours > 0) r.push(`écoulement continu depuis ${a.leakHours} h`);
+    if (a.quietMaxL > 0 && a.quietToH > a.quietFromH) r.push(`plus de ${L(a.quietMaxL)} entre ${a.quietFromH} h et ${a.quietToH} h`);
+    if (a.baseFlowRatio > 0) r.push(`débit de fond anormal (× ${String(a.baseFlowRatio).replace('.', ',')} la normale)`);
+    if (a.spikeRatio > 0) r.push(`jour × ${String(a.spikeRatio).replace('.', ',')} la médiane`);
+    return r.length ? `<strong>Alerte quand :</strong> ${r.join(' ; ')}.` : 'Aucune alerte active pour ce compteur.';
+  }
+  function wireMeterForm(fs) {
+    const inp = (n) => fs.querySelector(`[name="${n}"]`);
+    const read = () => { const a = {}; for (const k of ['dailyLimitL', 'monthlyLimitL', 'maxFlowLph', 'leakHours', 'quietFromH', 'quietToH', 'quietMaxL', 'baseFlowRatio', 'baseFlowMinLph', 'spikeRatio', 'staleHours']) a[k] = Number(inp(k).value) || 0; return a; };
+    const sel = fs.querySelector('[data-kind]');
+    const refresh = (setKind) => {
+      const a = read(), kind = setKind || kindOf(a);
+      sel.value = kind;
+      fs.querySelector('[data-kind-hint]').textContent = KIND_HINT[kind];
+      fs.querySelectorAll('[data-quiet]').forEach((el) => { el.hidden = kind === 'reseau'; });
+      fs.querySelector('[data-summary]').innerHTML = ruleSummary(a);
+    };
+    sel.onchange = () => {
+      const p = KIND_PRESETS[sel.value];
+      if (p) for (const [k, v] of Object.entries(p)) { if (k === 'quietFromH' || k === 'quietToH') { if (v === 0 || !Number(inp(k).value)) inp(k).value = v; } else inp(k).value = v; }
+      if (p && Number(inp('maxFlowLph').value) === 0) inp('maxFlowLph').value = 1500;
+      refresh(sel.value);
+    };
+    fs.addEventListener('input', (e) => { if (e.target !== sel) refresh(); });
+    refresh();
+    if (kindOf(read()) === 'perso') fs.querySelector('details.adv').open = true;
   }
 
   function readForm(form) {
@@ -620,6 +731,7 @@
     const dlg = $('#settings');
     dlg.innerHTML = settingsHtml();
     $('#btn-detect').onclick = detectVariables;
+    dlg.querySelectorAll('fieldset.meter-fs').forEach(wireMeterForm);
     if (mode === 'server') { loadKeyBox(); loadBackupBox(); loadAlertsMailBox(); }
     $('#btn-cancel').onclick = () => dlg.close();
     const persist = async () => { try { await saveCfg(); } catch (e) { window.alert('Enregistrement impossible : ' + e.message); } start(); };
@@ -850,6 +962,7 @@
       catch (e) { window.alert('Déconnexion impossible : ' + e.message); }
     };
     $('#btn-settings').onclick = openSettings;
+    $('#btn-help').onclick = openHelp;
     $('#btn-readings').onclick = openReadings;
     setupReadings();
     document.addEventListener('click', (e) => {

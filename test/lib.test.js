@@ -113,6 +113,33 @@ test('weeklyProfile : un jour sur 7 et 12 tranches, la somme est conservée', ()
   assert.ok(p.flat().every((x) => Math.abs(x - 20) < 1e-6)); // 10 L/h => 20 L par tranche de 2 h, partout
 });
 
+test('profil horaire : tranches décalées pour coïncider avec les relevés (ex. 16 h 30 – 18 h 30)', () => {
+  const day = at(2026, 6, 15);
+  const mk = (minutes) => { const out = []; let v = 1000; for (let t = day - 30 * DAYMS + minutes * 60e3; t <= day + 5 * 3600e3; t += 2 * H) { out.push({ t, v }); v += 20; } return out; };
+  assert.equal(WM.heatOffset(mk(10 * 60 + 29)), 30);            // relevés à 10 h 29, 12 h 29… : tranches 8 h 30 – 10 h 30
+  assert.equal(WM.heatOffset(mk(11 * 60 + 29)), 90);            // en heure d'été le même compteur tombe sur des heures impaires
+  assert.equal(WM.heatOffset(mk(10 * 60 + 2)), 0);              // relevés pile à l'heure
+  assert.equal(WM.heatOffset(mk(10 * 60 + 29).slice(0, 2)), 0); // trop peu de relevés
+  const irregular = [0, 47, 95, 20, 70, 110, 33, 5].map((m, i) => ({ t: day + i * 5 * H + m * 60e3, v: i }));
+  assert.equal(WM.heatOffset(irregular), 0);                    // pas de rythme régulier
+  const r = mk(10 * 60 + 29), end = r[r.length - 1].t;
+  for (const off of [0, 30, 60, 90]) {
+    const p = WM.weeklyProfile(WM.toIntervals(r), end, 4, off);
+    assert.equal(p.length, 7);
+    assert.ok(p.every((row) => row.length === 12));
+    assert.ok(p.flat().every((x) => Math.abs(x - 20) < 1e-6), `décalage ${off} : 10 L/h => 20 L par tranche`);
+  }
+});
+
+test('profil horaire décalé : un pic de consommation tombe dans la bonne tranche', () => {
+  // 100 L consommés entre 8 h 30 et 10 h 30 chaque jour : avec le décalage de 30 min ils sont tous dans la colonne « 8 h 30 », sinon coupés en deux
+  const iv = []; for (let d = 0; d < 35; d++) { const base = at(2026, 5, 1 + d); iv.push({ t0: base + (8 * 60 + 30) * 60e3, t1: base + (10 * 60 + 30) * 60e3, d: 100, reset: false }); }
+  const end = at(2026, 6, 4, 23);
+  const shifted = WM.weeklyProfile(iv, end, 4, 30), plain = WM.weeklyProfile(iv, end, 4, 0);
+  assert.ok(shifted.every((row) => Math.abs(row[4] - 100) < 1e-6 && row.filter((_, c) => c !== 4).every((x) => x === 0)));
+  assert.ok(plain.every((row) => row[4] < 100 && row[5] > 0));   // sans décalage la consommation est répartie sur deux cases
+});
+
 test('formats français', () => {
   assert.equal(WM.fmtVolume(0), '0 L');
   assert.equal(WM.fmtVolume(5.5), '5,5 L');

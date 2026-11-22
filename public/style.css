@@ -267,11 +267,44 @@ code { background: var(--bg); border-radius: 4px; padding: .05rem .3rem; font-si
   .navtoggle:checked ~ nav a { padding: .6rem .6rem; font-size: 1rem; }
   .navtoggle:checked ~ .top-actions { display: flex; flex-direction: column; align-items: stretch; border-top: 1px solid rgba(255, 255, 255, .2); padding-top: .5rem; }
   .top-tools { flex-wrap: wrap; }
-  .top-user { justify-content: space-between; }
-}
+  }
 @media print { .top-actions, .theme-btn { display: none; } }
 
-/* Réglages : alertes par mail */
+
+/* ===== Mise à jour commune ASL / eau : nom au-dessus de « Déconnexion », engrenage des paramètres, aide « ? » ===== */
+.top-user { flex-direction: column; align-items: flex-end; gap: 0; }
+.top-user .who-line { display: flex; align-items: baseline; gap: .5rem; }
+.top .who { line-height: 1.2; }
+.linkout { background: none; border: 0; padding: 0; margin: 0; font: inherit; font-size: .75rem; line-height: 1.25; color: #a9c0d8; cursor: pointer; text-decoration: underline; }
+.linkout:hover { color: #fff; }
+.top .gear { display: inline-flex; align-items: center; justify-content: center; gap: .4rem; flex: none; min-width: 2rem; height: 2rem; padding: 0 .35rem; border: 0; border-radius: 8px; background: none; color: #dbe6f1; cursor: pointer; text-decoration: none; font: inherit; font-size: .92rem; }
+.top .gear:hover { background: rgba(255, 255, 255, .12); color: #fff; }
+.top .gear.active { background: #fff; color: var(--brand); }
+:root[data-theme="dark"] .top .gear.active { color: #1f4e79; }
+.top .gear-label { display: none; }
+.top .help-btn { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 1.7rem; height: 1.7rem; padding: 0; border: 1.5px solid #a9c0d8; border-radius: 50%; background: none; color: #dbe6f1; font: inherit; font-weight: 700; font-size: .95rem; line-height: 1; cursor: pointer; text-decoration: none; }
+.top .help-btn:hover { background: rgba(255, 255, 255, .12); color: #fff; }
+@media (max-width: 700px) {
+  .top .gear-label { display: inline; }
+  .top .gear { justify-content: flex-start; }
+  .top-user { flex-direction: row; justify-content: space-between; align-items: center; }
+  .linkout { font-size: .85rem; }
+}
+
+/* Paramètres : alertes par mail */
 .check { display: flex; align-items: center; gap: .5rem; margin: .4rem 0; font-weight: 600; }
 .check input { width: auto; min-height: 0; }
 .row-btns { display: flex; flex-wrap: wrap; gap: .5rem; margin: .5rem 0; }
+
+/* Réglages d'alerte simplifiés */
+.meter-fs select { width: 100%; }
+.rule-summary { margin: 0; padding: .5rem .7rem; border-radius: 8px; background: var(--blue-bg); color: var(--text-primary); }
+details.adv { border-top: 1px dashed var(--border); padding-top: .5rem; }
+details.adv .stack { display: grid; gap: .65rem; }
+details.adv > summary { cursor: pointer; font-weight: 600; color: var(--blue); margin-bottom: .5rem; }
+
+/* Aide */
+.help-body { padding: 1.25rem; display: grid; gap: .6rem; }
+.help-body h3 { font-size: 1rem; margin: .6rem 0 0; }
+.help-body ul { margin: 0; padding-left: 1.2rem; display: grid; gap: .45rem; }
+.help-body p { margin: 0; }
