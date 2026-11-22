@@ -71,6 +71,17 @@
     return res;
   }
 
+  /**
+   * Part (0..1) de la consommation de chaque case qui vient d'intervalles espacés de plus de `maxSpanMs`
+   * (relevés manuels) : elle y est répartie uniformément, donc estimée et non mesurée.
+   */
+  function estimatedShare(intervals, edges, maxSpanMs) {
+    const lim = maxSpanMs || 36 * H;
+    const all = bucketize(intervals, edges);
+    const est = bucketize(intervals.filter((iv) => iv.t1 - iv.t0 > lim), edges);
+    return all.map((v, i) => (v > 0 ? est[i] / v : 0));
+  }
+
   function total(intervals, a, b) {
     return bucketize(intervals, [a, b])[0] || 0;
   }
@@ -143,12 +154,17 @@
     const prevMonthSame = total(intervals, addMonths(mon0, -1), addMonths(mon0, -1) + (ref - mon0));
     const year = total(intervals, yr0, ref + 1);
     const prevYearSame = total(intervals, addYears(yr0, -1), addYears(yr0, -1) + (ref - yr0));
+    // pas de comparaison si la période de référence commence avant le premier relevé (elle serait tronquée)
+    const first = readings[0].t;
+    // (tolérance de 2 jours : un premier relevé à 00:07 couvre en pratique le 1er du mois)
+    const monthComparable = addMonths(mon0, -1) >= first - 2 * DAY;
+    const yearComparable = addYears(yr0, -1) >= first - 2 * DAY;
 
     return {
       lastT: last.t, indexL: last.v,
       today, yesterday, avg7, last7,
-      month, monthVs: pct(month, prevMonthSame), prevMonthSame,
-      year, yearVs: pct(year, prevYearSame), prevYearSame,
+      month, monthVs: monthComparable ? pct(month, prevMonthSame) : null, prevMonthSame,
+      year, yearVs: yearComparable ? pct(year, prevYearSame) : null, prevYearSame,
       spark: bucketize(intervals, edgesBack(ref, 30, 'day')),
     };
   }
@@ -278,7 +294,7 @@
   const fmtTime = (ms) => new Date(ms).toLocaleString('fr-FR', { weekday: 'short', hour: '2-digit', minute: '2-digit' });
 
   return {
-    H, DAY, toReadings, toIntervals, bucketize, total,
+    H, DAY, toReadings, toIntervals, bucketize, estimatedShare, total,
     startOfDay, addDays, startOfMonth, addMonths, startOfYear, addYears,
     edgesBack, edgesHours, summarize, evaluateAlerts, weeklyProfile, median,
     fmtVolume, fmtDuration, fmtTime, pct,

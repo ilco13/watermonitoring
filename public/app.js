@@ -201,7 +201,7 @@
     const full = edges.slice(0, -1).map((a, i) => longLabel(a, edges[i + 1]));
     const lastT = Math.max(0, ...cfg.meters.map((m) => (state.data[m.id].readings.slice(-1)[0] || { t: 0 }).t));
     const open = edges.slice(0, -1).map((a, i) => edges[i + 1] > lastT && a <= lastT); // période en cours
-    const series = cfg.meters.map((m) => ({ m, raw: WM.bucketize(state.data[m.id].intervals, edges) }));
+    const series = cfg.meters.map((m) => ({ m, raw: WM.bucketize(state.data[m.id].intervals, edges), est: WM.estimatedShare(state.data[m.id].intervals, edges) }));
     return { labels, full, open, series };
   }
 
@@ -221,8 +221,8 @@
     $('#tablewrap').hidden = !state.asTable;
     if (state.asTable) {
       $('#tablewrap').innerHTML = `<table class="data num"><thead><tr><th>Période</th>${visible.map((s) => `<th>${esc(s.m.name)}</th>`).join('')}</tr></thead><tbody>${
-        spec.full.map((l, i) => `<tr><td>${esc(l)}${spec.open[i] ? ' (en cours)' : ''}</td>${visible.map((s) => `<td>${WM.fmtVolume(s.raw[i])}</td>`).join('')}</tr>`).reverse().join('')
-      }</tbody></table>`;
+        spec.full.map((l, i) => `<tr><td>${esc(l)}${spec.open[i] ? ' (en cours)' : ''}</td>${visible.map((s) => `<td>${s.est[i] >= 0.5 && s.raw[i] > 0 ? '≈ ' : ''}${WM.fmtVolume(s.raw[i])}</td>`).join('')}</tr>`).reverse().join('')
+      }</tbody></table><p class="small muted">≈ : valeur estimée, répartie uniformément entre deux relevés manuels espacés.</p>`;
       if (chart) { chart.destroy(); chart = null; }
       return;
     }
@@ -231,9 +231,12 @@
     const k = peak >= 5000 ? 1000 : 1, unit = k === 1000 ? 'm³' : 'L';
     const ink = cssVar('--text-secondary'), grid = cssVar('--grid'), surface = cssVar('--surface-1'), border = cssVar('--border'), primary = cssVar('--text-primary');
 
+    const anyEst = visible.some((s) => s.est.some((x, i) => x >= 0.5 && s.raw[i] > 0));
+    $('#est-note').hidden = !anyEst;
+    const alpha = (hex, a) => { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a})`; };
     const datasets = visible.map((s) => ({
-      label: s.m.name, raw: s.raw, data: s.raw.map((v) => v / k),
-      backgroundColor: cssVar(`--series-${s.m.slot}`),
+      label: s.m.name, raw: s.raw, est: s.est, data: s.raw.map((v) => v / k),
+      backgroundColor: s.est.map((x, i) => (x >= 0.5 && s.raw[i] > 0 ? alpha(cssVar(`--series-${s.m.slot}`), 0.4) : cssVar(`--series-${s.m.slot}`))),
       borderRadius: state.stacked ? 0 : { topLeft: 4, topRight: 4 }, borderSkipped: 'bottom',
       borderColor: surface, borderWidth: state.stacked ? 1 : 0,
       maxBarThickness: 28, barPercentage: 0.9, categoryPercentage: 0.8,
@@ -255,7 +258,7 @@
             backgroundColor: surface, titleColor: primary, bodyColor: ink, borderColor: border, borderWidth: 1, padding: 10, boxPadding: 4,
             callbacks: {
               title: (items) => spec.full[items[0].dataIndex] + (spec.open[items[0].dataIndex] ? ' (en cours)' : ''),
-              label: (c) => ` ${c.dataset.label} : ${WM.fmtVolume(c.dataset.raw[c.dataIndex])}`,
+              label: (c) => ` ${c.dataset.label} : ${c.dataset.est[c.dataIndex] >= 0.5 && c.dataset.raw[c.dataIndex] > 0 ? '≈ ' : ''}${WM.fmtVolume(c.dataset.raw[c.dataIndex])}${c.dataset.est[c.dataIndex] >= 0.5 && c.dataset.raw[c.dataIndex] > 0 ? ' (estimé)' : ''}`,
               footer: (items) => (items.length > 1 ? `Total : ${WM.fmtVolume(items.reduce((a, c) => a + c.dataset.raw[c.dataIndex], 0))}` : ''),
             },
           },

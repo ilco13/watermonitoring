@@ -159,3 +159,24 @@ test('débit de fond : hausse du minimum nocturne détectée, usage normal ignor
   assert.ok(al && al.level === 'serious');
   assert.equal(WM.evaluateAlerts({ ...cfg, baseFlowRatio: 0 }, leak, WM.toIntervals(leak), now).some((a) => a.code === 'baseflow'), false);
 });
+
+test('comparaison N-1 : absente si la période de référence précède le premier relevé', () => {
+  const now = at(2026, 6, 15, 12);
+  const short = constantFlow(at(2026, 1, 5), now, 10); // premier relevé en 2026
+  const s = WM.summarize(short, WM.toIntervals(short), now);
+  assert.equal(s.yearVs, null);            // 2025 n'existe pas
+  assert.notEqual(s.monthVs, null);        // mai 2026 est couvert
+  const long = constantFlow(at(2025, 1, 1), now, 10);
+  assert.notEqual(WM.summarize(long, WM.toIntervals(long), now).yearVs, null);
+});
+
+test('part estimée : relevés manuels espacés vs relevés toutes les 2 h', () => {
+  const now = at(2026, 6, 15, 12);
+  const manual = [{ t: at(2026, 1, 1, 10), v: 0 }, { t: at(2026, 3, 1, 10), v: 5900 }]; // 2 mois sans relevé
+  const dense = constantFlow(at(2026, 3, 1, 10), now, 10);
+  const iv = WM.toIntervals(manual.concat(dense.slice(1).map((r) => ({ t: r.t, v: 5900 + (r.v - 1000) }))));
+  const edges = WM.edgesBack(now, 6, 'month'); // janv. .. juin
+  const share = WM.estimatedShare(iv, edges);
+  assert.ok(share[0] > 0.99 && share[1] > 0.99, 'janvier et février : estimés');
+  assert.ok(share[3] < 0.01 && share[4] < 0.01, 'avril et mai : mesurés');
+});
