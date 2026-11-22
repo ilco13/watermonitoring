@@ -176,7 +176,8 @@ input:focus, select:focus { outline: 3px solid var(--focus); outline-offset: 1px
 .dlg-body h2, .dlg-body h3 { margin: 0; }
 .dlg-body h3 { font-size: 1rem; }
 #rd-form { display: grid; gap: .75rem; border: 1px solid var(--border); border-radius: 10px; padding: .9rem; }
-#rd-form .grid2 { align-items: end; }
+#rd-form .grid2 { align-items: start; }
+#rd-form .field .hint { min-height: 1.3em; }
 .rd-filters { display: flex; flex-wrap: wrap; gap: .75rem; align-items: center; justify-content: space-between; }
 .rd-filters label { display: inline-flex; gap: .4rem; align-items: center; color: var(--text-secondary); }
 .rd-filters select { width: auto; min-height: 0; padding: .3rem .5rem; }
@@ -313,3 +314,10 @@ details.adv > summary { cursor: pointer; font-weight: 600; color: var(--blue); m
 .synth-note { margin: -.35rem 0 .75rem; line-height: 1.4; min-height: 1.4em; }
 .hero-sub { line-height: 1.4; min-height: 2.8em; }
 @media (max-width: 700px) { .synth-note { min-height: 2.8em; } .hero-sub { min-height: 4.2em; } .stats { min-height: 9.5rem; align-content: start; } }
+
+/* Fenêtres (Paramètres, Données, Aide) : titre et croix de fermeture toujours visibles, même en bas de page */
+.dlg-head { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin: -1.25rem -1.25rem .25rem; padding: .7rem 1.25rem; background: var(--surface-1); border-bottom: 1px solid var(--border); }
+.dlg-head h2 { margin: 0; }
+.dlg-x { flex: none; width: 2.2rem; height: 2.2rem; display: inline-grid; place-items: center; padding: 0; border: 1px solid var(--border); border-radius: 50%; background: var(--surface-1); color: var(--text-secondary); font-size: 1rem; line-height: 1; cursor: pointer; }
+.dlg-x:hover { background: var(--blue-bg); color: var(--text-primary); }
+#rd-form input { height: 2.6rem; min-height: 2.6rem; }

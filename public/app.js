@@ -435,7 +435,7 @@
   function openHelp() {
     const dlg = $('#help');
     const bureau = canEdit();
-    dlg.innerHTML = `<div class="dlg-body help-body"><h2>Aide</h2>
+    dlg.innerHTML = `<div class="dlg-body help-body"><div class="dlg-head"><h2>Aide</h2><button class="dlg-x" type="button" aria-label="Fermer" title="Fermer" data-dlg-close>✕</button></div>
       <h3>Les trois pages</h3>
       <ul>
         <li><strong>Synthèse</strong> : les alertes en cours, puis pour chaque compteur la consommation d'aujourd'hui, d'hier, de la semaine, du mois et de l'année. « Calendaire » compte depuis le début du jour, de la semaine (lundi), du mois, de l'année ; « Glissant » compte les dernières 24 h, 7 jours, 30 jours, 12 mois.</li>
@@ -501,7 +501,7 @@
         </details>
       </fieldset>`).join('');
     return `<form method="dialog" id="settings-form">
-      <h2>Paramètres</h2>
+      <div class="dlg-head"><h2>Paramètres</h2><button class="dlg-x" type="button" aria-label="Fermer" title="Fermer" data-dlg-close>✕</button></div>
       ${mode === 'server' ? '<p class="hint">Ces paramètres s\'appliquent à tous les utilisateurs du site.</p>' : ''}
       ${meterFs}
       ${mode === 'server' ? `<fieldset><legend>Alertes par mail</legend>
@@ -848,11 +848,11 @@
   function openReadings() {
     const dlg = $('#readings');
     if (mode !== 'server') {
-      dlg.innerHTML = '<form method="dialog"><h2>Relevés</h2><p>La saisie n\'est pas disponible en mode démonstration : la page n\'est pas reliée à la base de données.</p><div class="dlg-actions"><button class="btn primary">Fermer</button></div></form>';
+      dlg.innerHTML = '<form method="dialog"><h2>Données</h2><p>La saisie n\'est pas disponible en mode démonstration : la page n\'est pas reliée à la base de données.</p><div class="dlg-actions"><button class="btn primary">Fermer</button></div></form>';
       dlg.showModal(); return;
     }
     rd.edit = null; rd.msg = ''; rd.err = false;
-    dlg.innerHTML = `<div class="dlg-body"><h2>Relevés</h2>
+    dlg.innerHTML = `<div class="dlg-body"><div class="dlg-head"><h2>Données</h2><button class="dlg-x" type="button" aria-label="Fermer" title="Fermer" data-dlg-close>✕</button></div>
       <p class="small muted">Ajoutez un relevé relu sur le compteur, corrigez une erreur ou supprimez un relevé. Les index se saisissent en m³ (ex. 1 299,7). Les totaux se recalculent aussitôt.</p>
       <div id="rd-form-box"></div>
       <div class="rd-filters"><h3>Relevés enregistrés</h3>
@@ -968,6 +968,7 @@
     };
     $('#btn-settings').onclick = openSettings;
     $('#btn-help').onclick = openHelp;
+    document.addEventListener('click', (ev) => { const x = ev.target.closest('[data-dlg-close]'); if (x) { const d = x.closest('dialog'); if (d) d.close(); } });
     $('#btn-readings').onclick = openReadings;
     setupReadings();
     document.addEventListener('click', (e) => {
