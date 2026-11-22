@@ -9,7 +9,12 @@
   },
   "workers_dev": true,
   "preview_urls": false,
-  "vars": {
-    "TAGO_API": "https://api.eu-w1.tago.io"
-  }
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "eau",
+      "database_id": "REMPLACER-PAR-LID-AFFICHE-PAR-wrangler-d1-create",
+      "migrations_dir": "migrations"
+    }
+  ]
 }

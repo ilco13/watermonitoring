@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "test": "node --test \"test/*.test.js\""
+    "test": "node --test \"test/*.test.js\"",
+    "db:local": "wrangler d1 migrations apply eau --local",
+    "db:remote": "wrangler d1 migrations apply eau --remote"
   },
   "devDependencies": {
     "wrangler": "^4.0.0"

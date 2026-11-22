@@ -1,0 +1,76 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { parseIngest, parseTime, parseNumber } from '../src/ingest.js';
+
+const NOW = Date.parse('2026-11-22T12:00:00Z');
+
+test('format TagoIO : objet seul, tableau, valeur texte', () => {
+  const r = parseIngest([
+    { variable: 'index_1', value: 123.4, time: '2026-11-22T10:00:00Z' },
+    { variable: 'index_2', value: '45,6', time: '2026-11-22T10:00:00Z', unit: 'm3', metadata: { a: 1 } },
+  ], NOW);
+  assert.equal(r.points.length, 2);
+  assert.deepEqual(r.points[0], { variable: 'index_1', ts: Date.parse('2026-11-22T10:00:00Z'), value: 123.4 });
+  assert.equal(r.points[1].value, 45.6);
+  assert.equal(parseIngest({ variable: 'x', value: 1 }, NOW).points[0].ts, NOW); // sans heure : heure de réception
+});
+
+test('message de données Live Objects : champs décodés de "value"', () => {
+  const r = parseIngest({
+    streamId: 'urn:lo:nsid:mqtt:device1', timestamp: '2026-11-22T10:00:00.000Z', model: 'pulse',
+    value: { index_1: 12, index_2: 7.5, status: 'OK', nested: { c: 3 }, flag: true }, tags: ['x'],
+  }, NOW);
+  const byVar = Object.fromEntries(r.points.map((p) => [p.variable, p.value]));
+  assert.deepEqual(byVar, { index_1: 12, index_2: 7.5, 'nested.c': 3 });
+  assert.equal(r.ignored, 2); // 'status' (texte) et 'flag' (booléen)
+  assert.ok(r.points.every((p) => p.ts === Date.parse('2026-11-22T10:00:00.000Z')));
+});
+
+test('objet plat et enveloppe {result: [...]}', () => {
+  const flat = parseIngest({ time: '2026-11-22T10:00:00Z', index_1: 5, index_2: 6 }, NOW);
+  assert.deepEqual(flat.points.map((p) => p.variable), ['index_1', 'index_2']);
+  const wrapped = parseIngest({ result: [{ variable: 'a', value: 1 }] }, NOW);
+  assert.equal(wrapped.points.length, 1);
+});
+
+test('contenu inexploitable : aucun point, jamais d\'exception', () => {
+  for (const bad of [null, undefined, 42, 'texte', [], {}, [null, 3, 'x'], { value: { a: 'abc' } }]) {
+    assert.equal(parseIngest(bad, NOW).points.length, 0);
+  }
+});
+
+test('parseTime / parseNumber', () => {
+  assert.equal(parseTime(1763805600, 0), 1763805600000);        // secondes
+  assert.equal(parseTime(1763805600000, 0), 1763805600000);     // millisecondes
+  assert.equal(parseTime('1763805600', 0), 1763805600000);
+  assert.equal(parseTime('n importe quoi', 7), 7);
+  assert.equal(parseNumber('1 2'), null);
+  assert.equal(parseNumber(null), null);
+  assert.equal(parseNumber(Infinity), null);
+  assert.equal(parseNumber('0'), 0);
+});
+
+test('plafond de points par requête', () => {
+  const big = Array.from({ length: 6000 }, (_, i) => ({ variable: 'v', value: i, time: i + 1e12 }));
+  assert.ok(parseIngest(big, NOW).points.length <= 5000);
+});
+
+test('Adeunis Pulse : genericSensor, message direct, imbriqué, ou en texte JSON', () => {
+  const msg = { streamId: 'urn:lo:nsid:mqtt:x', timestamp: '2026-11-22T10:00:00Z', model: 'pulse',
+    value: { genericSensor: { 0: { sensorType: 'counter', sensorValue: 1234 }, 1: { sensorValue: '567' } }, battery: 3.6 } };
+  const expected = [
+    { variable: 'index_eau_1', ts: Date.parse('2026-11-22T10:00:00Z'), value: 1234 },
+    { variable: 'index_eau_2', ts: Date.parse('2026-11-22T10:00:00Z'), value: 567 },
+  ];
+  assert.deepEqual(parseIngest(msg, NOW).points, expected);
+  // enveloppe TagoIO : variable "payload" dont la valeur est le message en texte
+  assert.deepEqual(parseIngest([{ variable: 'payload', value: JSON.stringify(msg) }], NOW).points
+    .map((p) => [p.variable, p.value]), [['index_eau_1', 1234], ['index_eau_2', 567]]);
+  // sans "value" intermédiaire, et heure absente -> heure de réception
+  const bare = parseIngest({ genericSensor: { 0: { sensorValue: 1 } } }, NOW).points;
+  assert.deepEqual(bare, [{ variable: 'index_eau_1', ts: NOW, value: 1 }]);
+  // voie sans sensorValue numérique : ignorée, pas d'exception
+  const r = parseIngest({ genericSensor: { 0: { sensorValue: 'n/a' } } }, NOW);
+  assert.equal(r.points.length, 0);
+  assert.equal(r.ignored, 2);
+});

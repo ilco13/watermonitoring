@@ -7,16 +7,15 @@
 
   /* ---------- Configuration (stockée dans ce navigateur) ---------- */
 
-  const CFG_KEY = 'wm.config.v1';
+  const CFG_KEY = 'wm.config.v2';
   const DEFAULT_CFG = {
-    apiUrl: 'https://api.eu-w1.tago.io',
-    token: '',
     historyYears: 3,
     refreshMin: 10,
+    // index_eau_1 = voie 0 du compteur (genericSensor "0"), index_eau_2 = voie 1 ; index en litres
     meters: [
-      { id: 'potable', name: 'Eau potable', variable: 'index_2', litresPerUnit: 1000, slot: 1,
+      { id: 'potable', name: 'Eau potable', variable: 'index_eau_2', litresPerUnit: 1, slot: 1,
         alerts: { dailyLimitL: 800, monthlyLimitL: 0, maxFlowLph: 2000, leakHours: 24, spikeRatio: 3, staleHours: 6 } },
-      { id: 'arrosage', name: 'Arrosage', variable: 'index_1', litresPerUnit: 1000, slot: 2,
+      { id: 'arrosage', name: 'Arrosage', variable: 'index_eau_1', litresPerUnit: 1, slot: 2,
         alerts: { dailyLimitL: 3000, monthlyLimitL: 0, maxFlowLph: 4000, leakHours: 0, spikeRatio: 0, staleHours: 6 } },
     ],
   };
@@ -33,34 +32,27 @@
   function saveCfg() { try { localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); } catch (e) { /* ignore */ } }
 
   let cfg = loadCfg();
-  let mode = 'demo'; // 'proxy' (Worker Cloudflare) | 'direct' (token dans le navigateur) | 'demo'
-  const state = { data: {}, tab: 'd30', stacked: false, hidden: new Set(), asTable: false, heatMeter: 0, loadedAt: 0, errors: [] };
+  let mode = 'demo'; // 'server' (Worker Cloudflare + D1) | 'demo'
+  const state = { data: {}, tab: 'd30', stacked: false, hidden: new Set(), asTable: false, heatMeter: 0, loadedAt: 0, errors: [], hint: '' };
   let chart = null;
   let timer = null;
 
   /* ---------- Accès aux données ---------- */
 
   async function detectMode() {
-    const forced = new URLSearchParams(location.search).has('demo');
-    if (forced) return 'demo';
+    if (new URLSearchParams(location.search).has('demo')) return 'demo';
     try {
       const r = await fetch('api/status', { cache: 'no-store' });
-      if (r.ok && (await r.json()).proxy) return 'proxy';
+      if (r.ok && (await r.json()).ok) return 'server';
     } catch (e) { /* pas de Worker : page ouverte en local ou hébergée ailleurs */ }
-    return cfg.token ? 'direct' : 'demo';
+    return 'demo';
   }
 
-  async function tagoGet(params) {
-    const q = new URLSearchParams(params);
-    let url, headers = { Accept: 'application/json' };
-    if (mode === 'proxy') url = 'api/data?' + q;
-    else { url = cfg.apiUrl.replace(/\/$/, '') + '/data?' + q; headers['Device-Token'] = cfg.token; }
-    const res = await fetch(url, { headers, cache: 'no-store' });
+  async function apiGet(path, params) {
+    const res = await fetch('api/' + path + '?' + new URLSearchParams(params), { cache: 'no-store' });
     let body = null;
     try { body = await res.json(); } catch (e) { /* corps vide */ }
-    if (!res.ok || (body && body.status === false)) {
-      throw new Error((body && body.message) || `HTTP ${res.status}`);
-    }
+    if (!res.ok || (body && body.status === false)) throw new Error((body && body.message) || `HTTP ${res.status}`);
     return (body && body.result) || [];
   }
 
@@ -68,7 +60,7 @@
     const start = new Date(); start.setFullYear(start.getFullYear() - cfg.historyYears); start.setMonth(0, 1); start.setHours(0, 0, 0, 0);
     const qty = 10000, rows = [];
     for (let skip = 0; ; skip += qty) {
-      const page = await tagoGet({ variable, qty, skip, start_date: start.toISOString(), ordination: 'descending' });
+      const page = await apiGet('data', { variable, qty, skip, start_date: start.toISOString(), ordination: 'descending' });
       rows.push(...page);
       if (page.length < qty) break;
     }
@@ -89,6 +81,15 @@
         state.errors.push(`${m.name} : ${e.message}`);
       }
     }));
+    state.hint = '';
+    if (state.errors.length && mode === 'server') {
+      try {
+        const vars = await apiGet('variables', {});
+        state.hint = vars.length
+          ? `Variables reçues : ${vars.map((v) => v.variable).join(', ')}. Corrigez le nom dans Réglages.`
+          : 'Aucun message reçu pour l\'instant : vérifiez l\'action Live Objects (README) puis ouvrez Réglages → Derniers messages reçus.';
+      } catch (e) { /* ignoré */ }
+    }
     state.loadedAt = Date.now();
   }
 
@@ -110,8 +111,8 @@
     const el = $('#banner');
     const parts = [];
     let err = false;
-    if (mode === 'demo') parts.push('<span><strong>Données de démonstration.</strong> Configurez la source réelle dans Réglages (ou déployez le Worker Cloudflare, voir README).</span>');
-    if (state.errors.length) { err = true; parts.push(`<span><strong>Lecture impossible.</strong> ${esc(state.errors.join(' · '))}</span>`); }
+    if (mode === 'demo') parts.push('<span><strong>Données de démonstration.</strong> Cette page n\'est pas reliée au Worker Cloudflare qui reçoit les messages de Live Objects (voir README).</span>');
+    if (state.errors.length) { err = true; parts.push(`<span><strong>Lecture impossible.</strong> ${esc(state.errors.join(' · '))}${state.hint ? '<br>' + esc(state.hint) : ''}</span>`); }
     el.hidden = !parts.length;
     el.classList.toggle('err', err);
     el.innerHTML = parts.join('') + (parts.length ? '<button class="btn" type="button" data-open-settings>Réglages</button>' : '');
@@ -296,8 +297,8 @@
       <fieldset data-i="${i}"><legend><span class="dot" style="background:${colorVar(m)}"></span> ${esc(m.name)}</legend>
         <div class="grid2">
           <div class="field"><label>Nom</label><input name="name" value="${esc(m.name)}"></div>
-          <div class="field"><label>Variable TagoIO de l'index</label><input name="variable" list="vars" value="${esc(m.variable)}"></div>
-          <div class="field"><label>Litres par unité d'index</label><input name="litresPerUnit" type="number" step="any" min="0" value="${m.litresPerUnit}"><span class="hint">1000 si l'index est en m³, 1 en litres, 10 si 1 impulsion = 10 L</span></div>
+          <div class="field"><label>Variable de l'index</label><input name="variable" list="vars" value="${esc(m.variable)}"></div>
+          <div class="field"><label>Litres par unité d'index</label><input name="litresPerUnit" type="number" step="any" min="0" value="${m.litresPerUnit}"><span class="hint">1 : l'index du compteur est déjà en litres (cas du décodeur actuel). 1000 s'il est en m³.</span></div>
         </div>
         <div class="grid2">
           <div class="field"><label>Seuil journalier (L)</label><input name="dailyLimitL" type="number" min="0" value="${m.alerts.dailyLimitL}"></div>
@@ -308,20 +309,14 @@
           <div class="field"><label>Alerte si aucun relevé depuis (h)</label><input name="staleHours" type="number" min="0" value="${m.alerts.staleHours}"></div>
         </div>
       </fieldset>`).join('');
-    const sourceFs = mode === 'proxy'
-      ? '<p class="hint">Source : Worker Cloudflare (le token TagoIO est un secret côté serveur, rien à saisir ici).</p>'
-      : `<div class="grid2">
-          <div class="field"><label>URL de l'API TagoIO</label><input name="apiUrl" value="${esc(cfg.apiUrl)}"></div>
-          <div class="field"><label>Device-Token (lecture seule conseillé)</label><input name="token" type="password" autocomplete="off" value="${esc(cfg.token)}"></div>
-        </div><p class="hint">Mode direct : le token reste dans ce navigateur (stockage local). Pour un usage partagé, préférez le Worker Cloudflare (README).</p>`;
     return `<form method="dialog" id="settings-form">
       <h2>Réglages</h2>
-      <fieldset><legend>Source des données</legend>${sourceFs}
+      <fieldset><legend>Données reçues de Live Objects</legend>
         <div class="grid2">
           <div class="field"><label>Historique chargé (années)</label><input name="historyYears" type="number" min="1" max="10" value="${cfg.historyYears}"></div>
           <div class="field"><label>Actualisation (minutes)</label><input name="refreshMin" type="number" min="1" value="${cfg.refreshMin}"></div>
         </div>
-        <div><button class="btn" type="button" id="btn-detect">Lister les variables reçues</button></div>
+        <div><button class="btn" type="button" id="btn-detect">Variables et derniers messages reçus</button></div>
         <div id="detect-out" hidden></div><datalist id="vars"></datalist>
       </fieldset>
       ${meterFs}
@@ -335,8 +330,6 @@
   function readForm(form) {
     const f = new FormData(form);
     const next = JSON.parse(JSON.stringify(cfg));
-    if (f.has('apiUrl')) next.apiUrl = String(f.get('apiUrl')).trim() || DEFAULT_CFG.apiUrl;
-    if (f.has('token')) next.token = String(f.get('token')).trim();
     next.historyYears = Math.min(10, Math.max(1, Number(f.get('historyYears')) || 3));
     next.refreshMin = Math.max(1, Number(f.get('refreshMin')) || 10);
     form.querySelectorAll('fieldset[data-i]').forEach((fs) => {
@@ -351,15 +344,17 @@
 
   async function detectVariables() {
     const out = $('#detect-out'); out.hidden = false; out.textContent = 'Lecture…';
+    if (mode !== 'server') { out.textContent = 'Aucun serveur de données joint (mode démonstration).'; return; }
     try {
-      const form = $('#settings-form');
-      const tmp = cfg; cfg = readForm(form);
-      let rows; try { rows = await tagoGet({ qty: 200 }); } finally { cfg = tmp; }
-      const by = new Map();
-      for (const r of rows) if (!by.has(r.variable)) by.set(r.variable, r);
-      if (!by.size) { out.textContent = 'Connexion OK mais aucune donnée reçue.'; return; }
-      $('#vars').innerHTML = [...by.keys()].map((v) => `<option value="${esc(v)}">`).join('');
-      out.textContent = 'Variables trouvées (dernière valeur, dernier relevé) :\n' + [...by.values()].map((r) => `• ${r.variable} = ${r.value}${r.unit ? ' ' + r.unit : ''}   (${fmtDateTime(Date.parse(r.time))})`).join('\n');
+      const [vars, events] = await Promise.all([apiGet('variables', {}), apiGet('events', { limit: 5 })]);
+      $('#vars').innerHTML = vars.map((v) => `<option value="${esc(v.variable)}">`).join('');
+      let txt = vars.length
+        ? 'Variables reçues (dernière valeur, dernier relevé, nombre de relevés) :\n' + vars.map((v) => `• ${v.variable} = ${v.value}   (${fmtDateTime(Date.parse(v.time))}, ${v.count} relevés)`).join('\n')
+        : 'Aucune variable reçue pour l\'instant.';
+      txt += '\n\nDerniers messages reçus :\n' + (events.length
+        ? events.map((e) => `• ${fmtDateTime(Date.parse(e.time))} — ${e.stored} mesure(s) retenue(s), ${e.ignored} ignorée(s)\n  ${e.raw.replace(/\s+/g, ' ').slice(0, 300)}`).join('\n')
+        : 'aucun.');
+      out.textContent = txt;
     } catch (e) { out.textContent = 'Échec : ' + e.message; }
   }
 
