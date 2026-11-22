@@ -11,16 +11,18 @@
 <header class="top">
   <a class="brand" href="{{ASL_URL}}/"><img class="brand-logo" src="{{ASL_URL}}/icone.png" alt="" width="36" height="36">{{ASL_NAME}}</a>
   <nav aria-label="Navigation">
-    <a href="{{ASL_URL}}/">← Retour à l'ASL</a>
-    <a class="active" href="/" aria-current="page">Consommation d'eau</a>
+    <a href="{{ASL_URL}}/" title="Retour à l'ASL" aria-label="Retour à l'ASL">← ASL</a>
+    <a data-view-link="synthese" href="#synthese">Synthèse</a>
+    <a data-view-link="graphiques" href="#graphiques">Graphiques</a>
+    <a data-view-link="profil" href="#profil">Profil horaire</a>
   </nav>
   <div class="top-actions">
     <span class="who" id="who"></span>
-    <button class="btn ghost" id="btn-refresh" type="button">Actualiser</button>
+    <button class="btn ghost icon" id="btn-refresh" type="button" title="Actualiser les données" aria-label="Actualiser les données">↻</button>
     <button class="btn ghost" id="btn-readings" type="button">Relevés</button>
     <button class="btn ghost" id="btn-settings" type="button">Réglages</button>
     <button class="btn ghost" id="btn-logout" type="button" hidden>Déconnexion</button>
-    <button class="btn ghost" id="btn-theme" type="button" title="Changer de thème">Thème : clair</button>
+    <button class="btn ghost icon" id="btn-theme" type="button" title="Changer de thème" aria-label="Changer de thème (actuellement clair)">☀</button>
   </div>
 </header>
 
@@ -30,12 +32,26 @@
 
   <div id="banner" class="banner" hidden></div>
 
+  <div data-view="synthese">
   <section class="panel" aria-labelledby="h-alerts">
     <h2 id="h-alerts">Alertes</h2>
     <ul id="alert-list"></ul>
   </section>
 
+  <div class="synth-bar">
+    <h2 id="h-synth">Consommation</h2>
+    <div class="opts">
+      <div class="seg" id="synth-seg" aria-label="Type de période">
+        <button type="button" data-synth="cal" aria-pressed="true">Calendaire</button>
+        <button type="button" data-synth="roll" aria-pressed="false">Glissant</button>
+      </div>
+      <span id="synth-note" class="small muted"></span>
+    </div>
+  </div>
   <section id="cards" class="cards" aria-label="Compteurs"></section>
+  </div>
+
+  <div data-view="graphiques" hidden>
 
   <section class="panel" aria-labelledby="h-conso">
     <div class="panel-head">
@@ -69,6 +85,9 @@
     <div class="tablewrap" id="tablewrap" hidden></div>
   </section>
 
+  </div>
+
+  <div data-view="profil" hidden>
   <section class="panel" aria-labelledby="h-heat">
     <div class="panel-head">
       <div>
@@ -77,9 +96,11 @@
       </div>
       <div class="seg" id="heat-seg" aria-label="Compteur"></div>
     </div>
+    <div id="heat-trend" class="heat-trend" aria-live="polite"></div>
     <div id="heat" class="heat" role="img" aria-label="Profil horaire moyen par jour de la semaine"></div>
     <div class="scale" id="heat-scale"></div>
   </section>
+  </div>
 
   <p class="small muted">Les consommations sont calculées à partir des index relevés toutes les 2 h, avec interpolation aux changements de jour, de mois et d'année (heure locale du navigateur).</p>
 </main>

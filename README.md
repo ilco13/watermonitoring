@@ -8,9 +8,10 @@ Compteur ──NB-IoT──▶ Live Objects ──HTTPS push──▶ Worker Clo
                                   navigateur ◀─────────┘  tableau de bord, connexion de l'ASL
 ```
 
-- **Cartes par compteur** : consommation du jour, d'hier, des 7 derniers jours, du mois et de l'année (avec comparaison au mois précédent et à N−1), index actuel, mini-courbe des 30 jours.
+- **Trois vues** (menu en haut, adresses `#synthese`, `#graphiques`, `#profil`) : **Synthèse** (alertes et cartes), **Graphiques**, **Profil horaire**.
+- **Synthèse** : au choix **calendaire** (par défaut : aujourd'hui, hier, semaine depuis lundi, mois, année) ou **glissante** (24 h, 7 j, 30 j, 12 mois jusqu'au dernier relevé), chaque période comparée à la précédente quand l'historique le permet. Par compteur : consommation du jour, d'hier, des 7 derniers jours, du mois et de l'année (avec comparaison au mois précédent et à N−1), index actuel, mini-courbe des 30 jours.
 - **Graphique** : 24 h, semaine, mois (au choix **calendaires** ou **glissants** jusqu'au dernier relevé), 90 jours, 12 mois, années. Côte à côte ou empilé, filtre par compteur, vue en tableau.
-- **Profil horaire** : moyenne par jour de la semaine et par tranche de 2 h. Une fuite se voit en cases colorées la nuit.
+- **Profil horaire** : moyenne par jour de la semaine et par tranche de 2 h. La case **où nous sommes** est entourée et porte la **tendance** (▲ plus, ▼ moins, = comme d'habitude) de la dernière tranche mesurée par rapport à la même tranche les 4 semaines précédentes. Une fuite se voit en cases colorées la nuit.
 - **Alertes** (calculées à l'affichage, réglables par compteur) : seuil journalier ou mensuel, débit moyen trop élevé, fuite (eau qui coule sans interruption depuis N heures), jour anormal (× la médiane), plus aucun relevé depuis N heures, index qui recule.
 
 Les consommations viennent des différences d'index, réparties au prorata du temps : un relevé à 13 h 07 ne fausse donc pas les totaux d'un jour, d'un mois ou d'une année.

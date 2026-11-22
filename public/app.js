@@ -37,7 +37,7 @@
 
   let cfg = loadCfg();
   let mode = 'demo'; // 'server' (Worker Cloudflare + D1) | 'demo'
-  const state = { me: null, data: {}, tab: 'm', mode: 'roll', stacked: false, hidden: new Set(), asTable: false, heatMeter: 0, loadedAt: 0, errors: [], hint: '' };
+  const state = { me: null, view: 'synthese', synthMode: 'cal', data: {}, tab: 'm', mode: 'roll', stacked: false, hidden: new Set(), asTable: false, heatMeter: 0, loadedAt: 0, errors: [], hint: '' };
   let chart = null;
   let timer = null;
 
@@ -116,6 +116,7 @@
 
   /* ---------- Formats ---------- */
 
+  const fmtHm = (t) => new Date(t).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
   const fmtDelta = (p) => {
     if (p == null || !isFinite(p)) return '';
     const r = Math.round(p);
@@ -152,7 +153,7 @@
           : ` · prochain relevé attendu à ${hm(next.at)} (en retard de ${WM.fmtDuration(-wait)})`;
     }
     const who = '';
-    const whoEl = $('#who'); if (whoEl) whoEl.textContent = state.me ? `${state.me.name || 'Connecté'} · ${state.me.role === 'admin' ? 'bureau' : 'coloti'}` : '';
+    const whoEl = $('#who'); if (whoEl) { whoEl.textContent = state.me ? (state.me.name || 'Connecté') : ''; whoEl.title = state.me ? (state.me.role === 'admin' ? 'Membre du bureau' : 'Coloti') : ''; }
     $('#status').textContent = lastT
       ? `Dernier relevé : ${fmtDateTime(lastT)} (il y a ${WM.fmtDuration(Date.now() - lastT)})${nextTxt} · actualisé à ${hm(state.loadedAt)}${who}`
       : 'Aucun relevé.';
@@ -189,24 +190,36 @@
   }
 
   function renderCards() {
+    const roll = state.synthMode === 'roll';
+    document.querySelectorAll('#synth-seg button').forEach((b) => b.setAttribute('aria-pressed', String((b.dataset.synth === 'roll') === roll)));
+    $('#synth-note').textContent = roll ? 'Fenêtres qui se terminent au dernier relevé' : "Aujourd'hui, la semaine depuis lundi, le mois et l'année en cours";
+    const v = (x) => WM.fmtVolume(x);
+    const vs = (p, what) => (p == null ? '' : `${fmtDelta(p)} vs ${what}`);
     $('#cards').innerHTML = cfg.meters.map((m) => {
       const d = state.data[m.id];
       const s = d && d.readings.length ? WM.summarize(d.readings, d.intervals, Date.now()) : null;
       if (!s) return `<article class="card"><div class="card-head"><span class="who"><span class="dot" style="background:${colorVar(m)}"></span>${esc(m.name)}</span></div><p class="muted">Pas de données.</p></article>`;
       const row = (label, val, delta) => `<div class="row"><dt>${label}</dt><dd class="num">${val}</dd><dd class="delta num">${delta || ''}</dd></div>`;
+      let hero, sub, rows;
+      if (!roll) {
+        hero = s.today;
+        sub = `aujourd'hui, jusqu'au relevé de ${fmtHm(s.lastT)} · moyenne des 7 jours précédents : ${v(s.avg7)}/jour`;
+        rows = [row('Hier', v(s.yesterday)), row('Cette semaine', v(s.week), vs(s.weekVs, 'sem. préc.')),
+          row('Ce mois', v(s.month), vs(s.monthVs, 'mois préc.')), row('Cette année', v(s.year), vs(s.yearVs, 'N−1'))];
+      } else {
+        const r = s.rolling;
+        hero = r.h24.cur;
+        sub = `24 dernières heures, jusqu'au relevé de ${fmtHm(s.lastT)}${r.h24.vs == null ? '' : ` · ${fmtDelta(r.h24.vs)} vs les 24 h précédentes`}`;
+        rows = [row('24 h précédentes', v(r.h24.prev)), row('7 jours glissants', v(r.d7.cur), vs(r.d7.vs, '7 j préc.')),
+          row('30 jours glissants', v(r.d30.cur), vs(r.d30.vs, '30 j préc.')),
+          row('12 mois glissants', v(r.d365.cur), r.d365.partial ? 'partiel (historique court)' : vs(r.d365.vs, '12 mois préc.'))];
+      }
       return `<article class="card" aria-label="${esc(m.name)}">
         <div class="card-head"><span class="who"><span class="dot" style="background:${colorVar(m)}"></span>${esc(m.name)}</span><span class="small muted num">Index ${fmtIndex(s.indexL)}</span></div>
-        <div class="hero num">${WM.fmtVolume(s.today)}</div>
-        <div class="hero-sub">aujourd'hui · moyenne des 7 jours précédents : ${WM.fmtVolume(s.avg7)}/jour</div>
-        ${sparkSvg(s.spark, m)}
-        <dl class="stats">
-          ${row('Hier', WM.fmtVolume(s.yesterday))}
-          ${row('24 h glissantes', WM.fmtVolume(s.roll24))}
-          ${row('7 jours glissants', WM.fmtVolume(s.roll7))}
-          ${row('30 jours glissants', WM.fmtVolume(s.roll30))}
-          ${row('Ce mois', WM.fmtVolume(s.month), fmtDelta(s.monthVs) && fmtDelta(s.monthVs) + ' vs mois préc.')}
-          ${row('Cette année', WM.fmtVolume(s.year), fmtDelta(s.yearVs) && fmtDelta(s.yearVs) + ' vs N−1')}
-        </dl></article>`;
+        <div class="hero num">${v(hero)}</div>
+        <div class="hero-sub">${sub}</div>
+        ${sparkSvg(roll ? s.sparkRoll : s.spark, m)}
+        <dl class="stats">${rows.join('')}</dl></article>`;
     }).join('');
   }
 
@@ -345,22 +358,46 @@
     $('#heat-seg').innerHTML = cfg.meters.map((x, i) => `<button type="button" data-heat="${i}" aria-pressed="${i === state.heatMeter}">${esc(x.name)}</button>`).join('');
     const d = state.data[m.id];
     const el = $('#heat');
-    if (!d || !d.readings.length) { el.innerHTML = ''; return; }
+    if (!d || !d.readings.length) { el.innerHTML = ''; $('#heat-trend').innerHTML = ''; return; }
     const prof = WM.weeklyProfile(d.intervals, d.readings[d.readings.length - 1].t, 4);
     const max = Math.max(1, ...prof.flat());
     const days = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
+    const dayNames = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche'];
+    const now = new Date(), nowRow = (now.getDay() + 6) % 7, nowCol = Math.floor(now.getHours() / 2);
+    const tr = WM.trendVsUsual(d.readings, d.intervals, 4);
+    const vol = (x) => WM.fmtVolume(x);
+    // pastille dans la case « maintenant » : le sens de la tendance (jamais la seule couleur)
+    const tag = !tr || tr.level === 'unknown' ? ['●', 'ici']
+      : tr.level === 'up' ? ['▲', `+${Math.round(tr.pct)} %`] : tr.level === 'down' ? ['▼', `−${Math.abs(Math.round(tr.pct))} %`]
+        : tr.level === 'unusual' ? ['!', 'inhabituel'] : ['=', 'habituel'];
     let html = '<div></div>' + Array.from({ length: 12 }, (_, i) => `<div class="h">${i % 2 === 0 ? i * 2 + 'h' : ''}</div>`).join('');
     prof.forEach((row, r) => {
       html += `<div class="d">${days[r]}</div>`;
-      row.forEach((v, c) => {
-        const pct = v <= 0 ? 0 : 10 + 90 * (v / max);
-        const bg = v <= 0 ? 'color-mix(in srgb, var(--text-muted) 10%, var(--surface-1))' : `color-mix(in srgb, ${colorVar(m)} ${pct.toFixed(0)}%, var(--surface-1))`;
-        const lbl = `${days[r]} ${c * 2}h–${c * 2 + 2}h : ${WM.fmtVolume(v)} en moyenne`;
-        html += `<div class="c" data-tip="${esc(lbl)}" style="background:${bg}" role="presentation"></div>`;
+      row.forEach((val, c) => {
+        const isNow = r === nowRow && c === nowCol;
+        const pct = val <= 0 ? 0 : 10 + 90 * (val / max);
+        const bg = val <= 0 ? 'color-mix(in srgb, var(--text-muted) 10%, var(--surface-1))' : `color-mix(in srgb, ${colorVar(m)} ${pct.toFixed(0)}%, var(--surface-1))`;
+        const lbl = `${days[r]} ${c * 2}h–${c * 2 + 2}h : ${vol(val)} en moyenne${isNow ? ' — vous êtes ici (maintenant)' : ''}`;
+        html += `<div class="c${isNow ? ' now' : ''}" data-tip="${esc(lbl)}" style="background:${bg}" role="presentation">${isNow ? `<span class="nt"><b>${tag[0]}</b><span class="t"> ${esc(tag[1])}</span></span>` : ''}</div>`;
       });
     });
     el.innerHTML = html;
-    $('#heat-scale').innerHTML = `0 <span class="bar" style="background:linear-gradient(90deg,color-mix(in srgb,var(--text-muted) 10%,var(--surface-1)),color-mix(in srgb,${colorVar(m)} 10%,var(--surface-1)),${colorVar(m)})"></span> ${WM.fmtVolume(max)} par tranche de 2 h`;
+    $('#heat-scale').innerHTML = `0 <span class="bar" style="background:linear-gradient(90deg,color-mix(in srgb,var(--text-muted) 10%,var(--surface-1)),color-mix(in srgb,${colorVar(m)} 10%,var(--surface-1)),${colorVar(m)})"></span> ${vol(max)} par tranche de 2 h`;
+
+    // texte de tendance : dernière tranche mesurée comparée à la même tranche, le même jour de la semaine, les semaines précédentes
+    let txt = `<strong>Maintenant</strong> : ${dayNames[nowRow]}, ${nowCol * 2} h–${nowCol * 2 + 2} h (case entourée). `;
+    if (!tr) txt += 'Pas encore assez de relevés récents pour comparer.';
+    else {
+      const win = `${fmtHm(tr.t0)} → ${fmtHm(tr.t1)}`, dn = dayNames[(new Date(tr.t1).getDay() + 6) % 7];
+      const base = `Dernière tranche mesurée (${win}) : <strong>${vol(tr.value)}</strong>`;
+      const usual = tr.usual == null ? '' : `${vol(tr.usual)} en moyenne ces ${tr.weeks} derniers ${dn}s à la même heure`;
+      txt += tr.level === 'unknown' ? `${base}. Pas assez de semaines comparables pour dire si c'est habituel (il en faut au moins 2).`
+        : tr.level === 'up' ? `${base}, soit <span class="trend-pill">▲ ${fmtDelta(tr.pct).replace('▲ ', '')}</span> par rapport à d'habitude (${usual}).`
+          : tr.level === 'down' ? `${base}, soit <span class="trend-pill">▼ ${fmtDelta(tr.pct).replace('▼ ', '')}</span> par rapport à d'habitude (${usual}).`
+            : tr.level === 'unusual' ? `${base} alors que d'habitude presque rien à cette heure (${usual}) : <span class="trend-pill warn">! consommation inhabituelle</span>`
+              : `${base} : <span class="trend-pill">= comme d'habitude</span> (${usual}).`;
+    }
+    $('#heat-trend').innerHTML = txt;
   }
 
   /* ---------- Réglages ---------- */
@@ -663,7 +700,8 @@
   function applyTheme(t) {
     t = t === 'dark' ? 'dark' : 'light'; // clair par défaut, comme l'ASL ; le sombre est un choix explicite
     document.documentElement.dataset.theme = t;
-    $('#btn-theme').textContent = 'Thème : ' + (t === 'dark' ? 'sombre' : 'clair');
+    const tb = $('#btn-theme'); tb.textContent = t === 'dark' ? '☾' : '☀';
+    tb.setAttribute('aria-label', `Changer de thème (actuellement ${t === 'dark' ? 'sombre' : 'clair'})`); tb.title = t === 'dark' ? 'Thème sombre : passer au clair' : 'Thème clair : passer au sombre';
     try { localStorage.setItem('wm.theme', t); } catch (e) { /* ignore */ }
   }
 
@@ -678,8 +716,25 @@
 
   /* ---------- Orchestration ---------- */
 
+  /* ---------- Vues : synthèse, graphiques, profil horaire (adresse #synthese, #graphiques, #profil) ---------- */
+
+  const VIEWS = ['synthese', 'graphiques', 'profil'];
+  function showView() {
+    const h = (location.hash || '').slice(1);
+    state.view = VIEWS.includes(h) ? h : 'synthese';
+    document.querySelectorAll('[data-view]').forEach((el) => { el.hidden = el.dataset.view !== state.view; });
+    document.querySelectorAll('[data-view-link]').forEach((link) => {
+      const on = link.dataset.viewLink === state.view;
+      link.classList.toggle('active', on);
+      if (on) link.setAttribute('aria-current', 'page'); else link.removeAttribute('aria-current');
+    });
+    if (state.loadedAt) renderView();
+  }
+  // seule la vue affichée est dessinée : un graphique dans une zone masquée n'aurait pas de taille
+  function renderView() { if (state.view === 'graphiques') renderChart(); else if (state.view === 'profil') renderHeat(); }
+
   function renderAll() {
-    renderBanner(); renderStatus(); renderAlerts(); renderCards(); renderChart(); renderHeat();
+    renderBanner(); renderStatus(); renderAlerts(); renderCards(); renderView();
   }
 
   async function start() {
@@ -702,7 +757,7 @@
   function init() {
     let theme = 'light'; try { theme = localStorage.getItem('wm.theme') || 'light'; } catch (e) { /* ignore */ }
     applyTheme(theme);
-    $('#btn-theme').onclick = () => { applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'); renderChart(); };
+    $('#btn-theme').onclick = () => { applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'); renderView(); };
     $('#btn-refresh').onclick = async () => { $('#status').textContent = 'Actualisation…'; await loadAll(); renderAll(); };
     $('#btn-logout').onclick = async () => {
       try { location.href = (await apiSend('POST', 'logout', {})).result.url; }   // ferme la session ici puis celle de l'ASL
@@ -716,12 +771,15 @@
       if (t.hasAttribute('data-open-settings')) openSettings();
       else if (t.dataset.tab) { state.tab = t.dataset.tab; renderChart(); }
       else if (t.dataset.mode) { state.mode = t.dataset.mode; renderChart(); }
+      else if (t.dataset.synth) { state.synthMode = t.dataset.synth; renderCards(); }
       else if (t.dataset.meter) { state.hidden.has(t.dataset.meter) ? state.hidden.delete(t.dataset.meter) : state.hidden.add(t.dataset.meter); renderChart(); }
       else if (t.dataset.stack != null) { state.stacked = t.dataset.stack === '1'; renderChart(); }
       else if (t.dataset.heat != null) { state.heatMeter = Number(t.dataset.heat); renderHeat(); }
     });
     $('#as-table').onchange = (e) => { state.asTable = e.target.checked; renderChart(); };
     setupTip();
+    window.addEventListener('hashchange', showView);
+    showView();
     setInterval(() => { if (state.loadedAt) renderStatus(); }, 30000);
     start();
   }

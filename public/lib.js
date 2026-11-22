@@ -186,6 +186,16 @@
     // pas de comparaison si la période de référence commence avant le premier relevé (elle serait tronquée)
     const first = readings[0].t;
     // (tolérance de 2 jours : un premier relevé à 00:07 couvre en pratique le 1er du mois)
+    const week0 = startOfWeek(ref);
+    const prevWeek0 = addDays(week0, -7);
+    const week = total(intervals, week0, ref + 1);
+    const prevWeekSame = total(intervals, prevWeek0, prevWeek0 + (ref - week0));
+    // fenêtre glissante terminée au dernier relevé, comparée à la fenêtre de même durée qui la précède
+    const pair = (len) => ({
+      cur: total(intervals, ref - len, ref + 1), prev: total(intervals, ref - 2 * len, ref - len),
+      vs: ref - 2 * len >= first - 2 * DAY ? pct(total(intervals, ref - len, ref + 1), total(intervals, ref - 2 * len, ref - len)) : null,
+      partial: ref - len < first - 2 * DAY, // la fenêtre commence avant le premier relevé : total incomplet
+    });
     const monthComparable = addMonths(mon0, -1) >= first - 2 * DAY;
     const yearComparable = addYears(yr0, -1) >= first - 2 * DAY;
 
@@ -194,7 +204,10 @@
       today, yesterday, avg7, roll24, roll7, roll30,
       month, monthVs: monthComparable ? pct(month, prevMonthSame) : null, prevMonthSame,
       year, yearVs: yearComparable ? pct(year, prevYearSame) : null, prevYearSame,
+      week, weekVs: prevWeek0 >= first - 2 * DAY ? pct(week, prevWeekSame) : null,
+      rolling: { h24: pair(DAY), d7: pair(7 * DAY), d30: pair(30 * DAY), d365: pair(365 * DAY) },
       spark: bucketize(intervals, edgesBack(ref, 30, 'day')),
+      sparkRoll: bucketize(intervals, edgesRolling(ref, 30, DAY)),
     };
   }
 
@@ -213,6 +226,34 @@
     if (gaps.length < 3) return null;
     const period = median(gaps), anchor = auto[auto.length - 1].t;
     return { at: anchor + period, period, anchor };
+  }
+
+  /**
+   * Tendance : consommation de la dernière tranche mesurée (entre les deux derniers relevés automatiques) comparée à celle
+   * de la même tranche, le même jour de la semaine, sur les `weeks` semaines précédentes (fenêtres décalées de 7 jours calendaires).
+   * level : 'up' | 'down' | 'same' | 'unusual' (consommation alors que d'habitude presque rien) | 'unknown' (historique insuffisant).
+   */
+  function trendVsUsual(readings, intervals, weeks) {
+    const W = weeks || 4;
+    const auto = readings.filter((r) => r.src !== 'manual');
+    if (auto.length < 3) return null;
+    const a = auto[auto.length - 2].t, b = auto[auto.length - 1].t;
+    if (b - a < 30 * 60e3 || b - a > 6 * H) return null;
+    const value = total(intervals, a, b), first = readings[0].t, vals = [];
+    for (let k = 1; k <= W; k++) {
+      const s0 = addDays(a, -7 * k), e0 = addDays(b, -7 * k);
+      if (s0 < first - 2 * H) continue;                                                           // avant les premiers relevés
+      if (intervals.some((iv) => iv.t1 > s0 && iv.t0 < e0 && iv.t1 - iv.t0 > 6 * H)) continue;   // période seulement estimée (relevés manuels espacés)
+      vals.push(total(intervals, s0, e0));
+    }
+    const base = { t0: a, t1: b, value, weeks: vals.length };
+    if (vals.length < 2) return { ...base, usual: null, pct: null, level: 'unknown' };
+    const usual = vals.reduce((x, y) => x + y, 0) / vals.length;
+    if (usual >= 5) {
+      const p = (value - usual) / usual * 100;
+      return { ...base, usual, pct: p, level: p > 15 ? 'up' : p < -15 ? 'down' : 'same' };
+    }
+    return { ...base, usual, pct: null, level: value - usual > 10 ? 'unusual' : 'same' };
   }
 
   /* ---------- Alertes ---------- */
@@ -356,7 +397,7 @@
   return {
     H, DAY, toReadings, toIntervals, bucketize, estimatedShare, total,
     startOfDay, addDays, startOfMonth, addMonths, startOfYear, addYears, startOfWeek,
-    edgesBack, edgesHours, edgesCalendar, edgesRolling, nextExpected, summarize, evaluateAlerts, weeklyProfile, median,
+    edgesBack, edgesHours, edgesCalendar, edgesRolling, nextExpected, trendVsUsual, summarize, evaluateAlerts, weeklyProfile, median,
     fmtVolume, fmtDuration, fmtTime, pct,
   };
 });

@@ -258,3 +258,50 @@ test('prochain relevé attendu : dernier relevé automatique + période habituel
   assert.equal(WM.nextExpected(auto.slice(0, 3)), null);
   assert.equal(WM.nextExpected([]), null);
 });
+
+test('synthèse : semaine calendaire et fenêtres glissantes comparées à la précédente', () => {
+  const now = at(2026, 6, 17, 12); // mercredi
+  const r = constantFlow(at(2025, 1, 1), now, 10); // 240 L / jour partout
+  const s = WM.summarize(r, WM.toIntervals(r), now);
+  assert.ok(Math.abs(s.week - (2 * 240 + 12 * 10)) < 2, 'lundi, mardi + 12 h de mercredi');
+  assert.ok(Math.abs(s.rolling.h24.cur - 240) < 1 && Math.abs(s.rolling.h24.prev - 240) < 1);
+  assert.ok(Math.abs(s.rolling.d7.cur - 7 * 240) < 1 && Math.abs(s.rolling.d30.cur - 30 * 240) < 1);
+  assert.ok(Math.abs(s.rolling.d365.cur - 365 * 240) < 5);
+  assert.ok(Math.abs(s.rolling.d7.vs) < 1 && Math.abs(s.rolling.h24.vs) < 1, 'même débit : variation nulle');
+  assert.equal(s.rolling.d365.partial, false);
+  assert.equal(s.sparkRoll.length, 30);
+  // historique court : pas de comparaison, et la fenêtre de 12 mois est signalée partielle
+  const short = constantFlow(at(2026, 3, 1), now, 10); // ~108 jours : couvre 30 j + 30 j précédents, pas 12 mois
+  const q = WM.summarize(short, WM.toIntervals(short), now);
+  assert.equal(q.rolling.d365.partial, true);
+  assert.equal(q.rolling.d365.vs, null);
+  assert.equal(q.rolling.d30.vs !== null, true);
+  assert.equal(q.weekVs !== null, true);
+});
+
+test('tendance par rapport à d\'habitude : plus, moins, pareil, inhabituel, historique insuffisant', () => {
+  const end = at(2026, 6, 14, 16, 30); // dimanche
+  // profil hebdomadaire : 10 L/h partout ; la dernière tranche (14 h 30 -> 16 h 30) est paramétrée
+  const make = (lastFactor, weeks = 6, base = 10) => {
+    const r = []; let v = 0;
+    const start = end - weeks * 7 * 24 * H;
+    for (let t = start; t <= end; t += 2 * H) {
+      v += (t === end ? base * lastFactor : base) * 2; r.push({ t, v, src: 'auto' });
+    }
+    return r;
+  };
+  const trend = (readings) => WM.trendVsUsual(readings, WM.toIntervals(readings));
+  let t = trend(make(1.5));
+  assert.equal(t.level, 'up'); assert.ok(Math.abs(t.pct - 50) < 3, 'pct ' + t.pct); assert.equal(t.weeks, 4);
+  assert.equal(trend(make(0.4)).level, 'down');
+  assert.equal(trend(make(1.05)).level, 'same');
+  // d'habitude presque rien (0,5 L/h), mais 30 L sur la tranche : inhabituel
+  t = trend(make(60, 6, 0.5)); assert.equal(t.level, 'unusual');
+  assert.equal(trend(make(1, 6, 0.5)).level, 'same');
+  // pas assez de semaines comparables
+  assert.equal(trend(make(1.5, 1)).level, 'unknown');
+  // relevés manuels ignorés : un relevé manuel plus récent ne change pas la tranche mesurée
+  const withManual = make(1.5).concat([{ t: end + 30 * 60e3, v: 99999, src: 'manual' }]);
+  assert.equal(trend(withManual).t1, end);
+  assert.equal(WM.trendVsUsual([], []), null);
+});
