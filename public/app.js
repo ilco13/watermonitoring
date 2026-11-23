@@ -429,6 +429,50 @@
     $('#heat-trend').innerHTML = txt;
   }
 
+  /* ---------- Profils sur la semaine, le mois, l'année ---------- */
+
+  let calChart = null;
+  const CAL_UNITS = { slot: 'tranche de 2 h', day: 'jour', week: 'semaine', month: 'mois' };
+  const CAL_ALLOWED = { hour: ['slot'], weekday: ['slot', 'day'], dom: ['slot', 'day'], month: ['slot', 'day', 'week', 'month'] };
+  const CAL_DEFAULT_UNIT = { hour: 'slot', weekday: 'day', dom: 'day', month: 'month' };
+  function renderCal() {
+    const c = state.cal = Object.assign({ x: 'weekday', unit: 'day', y: 'mean' }, state.cal);
+    if (!CAL_ALLOWED[c.x].includes(c.unit)) c.unit = CAL_DEFAULT_UNIT[c.x];
+    const uname = CAL_UNITS[c.unit];
+    $('#cal-x').value = c.x;
+    $('#cal-unit').innerHTML = CAL_ALLOWED[c.x].map((u) => `<option value="${u}">${CAL_UNITS[u][0].toUpperCase() + CAL_UNITS[u].slice(1)}</option>`).join(''); $('#cal-unit').value = c.unit;
+    $('#cal-y').innerHTML = `<option value="mean">Volume moyen par ${uname}</option><option value="max">Volume de la ${c.unit === 'day' || c.unit === 'month' ? 'plus forte' : 'plus forte'} ${uname}</option><option value="flow">Débit minimal (fuite, L/h)</option>`;
+    $('#cal-y').value = c.y;
+    const metersData = cfg.meters.filter((m) => state.data[m.id] && state.data[m.id].readings.length);
+    if (!metersData.length) { $('#cal-note').textContent = ''; return; }
+    const off = c.x === 'hour' || c.unit === 'slot' ? WM.heatOffset(state.data[metersData[0].id].readings) : 0;
+    const prof = Object.fromEntries(metersData.map((m) => [m.id, WM.groupedProfile(state.data[m.id].readings, state.data[m.id].intervals, { x: c.x, y: c.y, unit: c.unit, offsetMin: off }).groups]));
+    const hh = (min) => `${Math.floor(min / 60) % 24}h${min % 60 ? String(min % 60).padStart(2, '0') : ''}`;
+    const labels = { weekday: ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'], dom: Array.from({ length: 31 }, (_, i) => String(i + 1)), month: ['Janv', 'Févr', 'Mars', 'Avr', 'Mai', 'Juin', 'Juil', 'Août', 'Sept', 'Oct', 'Nov', 'Déc'], hour: Array.from({ length: 12 }, (_, i) => hh(i * 120 + off)) }[c.x];
+    const full = { weekday: ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche'], dom: labels.map((l) => `le ${l}`), month: ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'], hour: labels.map((l, i) => `${hh(i * 120 + off)} – ${hh(i * 120 + off + 120)}`) }[c.x];
+    $('#cal-hint').textContent = `${c.y === 'flow' ? 'Plus petit débit observé' : c.y === 'max' ? 'Plus forte consommation observée' : 'Consommation moyenne'} sur une ${uname}, selon ${{ weekday: 'le jour de la semaine', hour: "l'heure du jour", dom: 'le jour du mois', month: "le mois de l'année" }[c.x]}. Seules les périodes complètes et mesurées comptent.`;
+    const fmt = (v) => (c.y === 'flow' ? `${v < 10 ? v.toFixed(1).replace('.', ',') : Math.round(v)} L/h` : WM.fmtVolume(v));
+    const note = metersData.map((m) => {
+      const arr = prof[m.id], best = arr.reduce((bi, x, i) => (x.n && (bi < 0 || x.value > arr[bi].value) ? i : bi), -1), low = arr.reduce((bi, x, i) => (x.n && (bi < 0 || x.value < arr[bi].value) ? i : bi), -1);
+      const who = `<span class="who"><span class="dot" style="background:${colorVar(m)}"></span>${esc(m.name)}</span>`;
+      return best < 0 ? `${who} : pas encore de période complète.` : `${who} : le plus fort <strong>${full[best]}</strong> (${fmt(arr[best].value)}, ${arr[best].n} mesure${arr[best].n > 1 ? 's' : ''})${low !== best ? `, le plus faible <strong>${full[low]}</strong> (${fmt(arr[low].value)})` : ''}.`;
+    }).join('<br>');
+    $('#cal-note').innerHTML = note;
+    const peak = Math.max(1, ...metersData.flatMap((m) => prof[m.id].map((x) => x.value || 0)));
+    const k = c.y !== 'flow' && peak >= 5000 ? 1000 : 1, unit = c.y === 'flow' ? 'L/h' : (k === 1000 ? 'm³' : 'L') + ' par ' + uname;
+    const ink = cssVar('--text-secondary'), grid = cssVar('--grid'), surface = cssVar('--surface-1'), border = cssVar('--border'), primary = cssVar('--text-primary');
+    const datasets = metersData.map((m) => ({ label: m.name, raw: prof[m.id], data: prof[m.id].map((x) => (x.value == null ? null : x.value / k)), backgroundColor: cssVar(`--series-${m.slot}`), borderRadius: { topLeft: 4, topRight: 4 }, borderSkipped: 'bottom', maxBarThickness: 28, barPercentage: 0.9, categoryPercentage: 0.8 }));
+    if (calChart) calChart.destroy();
+    calChart = new Chart($('#cal-chart'), {
+      type: 'bar', data: { labels, datasets },
+      options: { responsive: true, maintainAspectRatio: false, animation: { duration: 250 }, interaction: { mode: 'index', intersect: false },
+        scales: { x: { grid: { display: false }, border: { color: grid }, ticks: { color: ink, maxRotation: 0, autoSkip: true, maxTicksLimit: 16 } }, y: { beginAtZero: true, border: { display: false }, grid: { color: grid }, ticks: { color: ink }, title: { display: true, text: unit, color: ink } } },
+        plugins: { legend: { display: false }, tooltip: { backgroundColor: surface, titleColor: primary, bodyColor: ink, borderColor: border, borderWidth: 1, padding: 10,
+          callbacks: { title: (it) => full[it[0].dataIndex], label: (ci) => { const r = ci.dataset.raw[ci.dataIndex]; return ` ${ci.dataset.label} : ${r.n ? fmt(r.value) + ' (' + r.n + ' mesure' + (r.n > 1 ? 's' : '') + ')' : 'pas de mesure'}`; } } } } },
+    });
+    $('#cal-chart').setAttribute('aria-label', `${$('#cal-hint').textContent}`);
+  }
+
   /* ---------- Aide ---------- */
 
   function openHelp() {
@@ -439,7 +483,7 @@
       <ul>
         <li><strong>Synthèse</strong> : les alertes en cours, puis pour chaque compteur la consommation d'aujourd'hui, d'hier, de la semaine, du mois et de l'année. « Calendaire » compte depuis le début du jour, de la semaine (lundi), du mois, de l'année ; « Glissant » compte les dernières 24 h, 7 jours, 30 jours, 12 mois.</li>
         <li><strong>Graphiques</strong> : la consommation par heure, jour, semaine, mois ou année, et l'index du compteur. Le signe « ≈ » ou une teinte plus claire signale une période seulement estimée, faute de relevés assez rapprochés.</li>
-        <li><strong>Profil horaire</strong> : la consommation moyenne de chaque tranche de 2 h, par jour de semaine (4 dernières semaines). La case entourée est celle de la <strong>dernière mesure</strong> ; son texte passe du vert (consommation plus faible que d'habitude, ▼) au blanc (pareil, =) puis au rouge cramoisi (plus forte, ▲, saturé à +200 %). Selon le compteur : pour l'eau potable une fuite se voit en cases colorées la nuit ; pour l'arrosage (qui ne coule que la nuit) c'est une case colorée en journée qui est suspecte.</li>
+        <li><strong>Profil horaire</strong> (et en dessous « Quand consomme-t-on le plus ? » : moyenne par jour de la semaine, par jour du mois et par mois de l'année) : la consommation moyenne de chaque tranche de 2 h, par jour de semaine (4 dernières semaines). La case entourée est celle de la <strong>dernière mesure</strong> ; son texte passe du vert (consommation plus faible que d'habitude, ▼) au blanc (pareil, =) puis au rouge cramoisi (plus forte, ▲, saturé à +200 %). Selon le compteur : pour l'eau potable une fuite se voit en cases colorées la nuit ; pour l'arrosage (qui ne coule que la nuit) c'est une case colorée en journée qui est suspecte.</li>
       </ul>
       <h3>D'où viennent les chiffres</h3>
       <p>Le compteur envoie son index toutes les 2 heures environ ; la consommation d'une période est calculée à partir de ces index, répartis au prorata du temps. Le prochain relevé attendu est indiqué en haut de page. Le bouton ↻ recharge les données.</p>
@@ -1008,7 +1052,7 @@
     if (state.loadedAt) renderView();
   }
   // seule la vue affichée est dessinée : un graphique dans une zone masquée n'aurait pas de taille
-  function renderView() { if (state.view === 'graphiques') renderChart(); else if (state.view === 'profil') renderHeat(); }
+  function renderView() { if (state.view === 'graphiques') renderChart(); else if (state.view === 'profil') { renderHeat(); renderCal(); } }
 
   function renderAll() {
     renderBanner(); renderStatus(); renderAlerts(); renderCards(); renderView();
@@ -1039,6 +1083,7 @@
     };
     $('#btn-settings').onclick = openSettings;
     $('#btn-help').onclick = openHelp;
+    for (const [id, key] of [['#cal-x', 'x'], ['#cal-unit', 'unit'], ['#cal-y', 'y']]) $(id).addEventListener('change', (e) => { state.cal = Object.assign({}, state.cal, { [key]: e.target.value }); if (key === 'x') delete state.cal.unit; renderCal(); });
     document.addEventListener('click', (ev) => { const x = ev.target.closest('[data-dlg-close]'); if (x) { const d = x.closest('dialog'); if (d) d.close(); } });
     $('#btn-readings').onclick = openReadings;
     setupReadings();

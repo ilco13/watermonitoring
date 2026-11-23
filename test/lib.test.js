@@ -447,3 +447,38 @@ test('adaptatif : des maisons en travaux élargissent la tolérance sur le volum
   assert.equal(WM.mergeCfg(null).site.works, 4);
   assert.equal(WM.mergeCfg(null).site.people[0].n, 5);
 });
+
+test('profils calendaires : jour de la semaine, jour du mois, mois de l\'année (jours complets seulement)', () => {
+  const start = at(2026, 1, 1), days = 110;
+  const r = []; let v = 0;
+  for (let t = start - 2 * H; t <= start + days * DAYMS; t += 2 * H) { const d = new Date(t - H); v += d.getDay() === 6 ? 40 : 20; r.push({ t, v }); }   // samedi : 480 L/jour ; autres : 240 L/jour
+  const p = WM.calendarProfiles(r, WM.toIntervals(r));
+  assert.ok(p.days > 100);
+  p.weekday.forEach((x, i) => assert.ok(Math.abs(x.avg - (i === 5 ? 480 : 240)) < 15, `jour ${i} : ${x.avg}`));
+  assert.ok(p.dom.slice(0, 28).every((x) => x.n >= 3));
+  assert.ok(p.month[0].n === 1 && p.month[1].n === 1 && p.month[2].n === 1 && p.month[3].n === 0, 'janv. à mars complets, avril incomplet');
+  assert.ok(p.month[0].avg > p.month[1].avg, 'janvier (31 j) > février (28 j)');
+  assert.equal(WM.calendarProfiles([], []).days, 0);
+});
+
+test('profil à la demande : x = jour de la semaine / heure / jour du mois / mois, regroupement = tranche / jour / semaine / mois', () => {
+  const start = at(2026, 6, 1), r = []; let v = 0;
+  for (let t = start - 2 * H; t <= start + 110 * DAYMS; t += 2 * H) { const d = new Date(t - H); v += (d.getDay() === 6 ? 40 : 20) + (d.getHours() === 3 ? -19 : 0); r.push({ t, v }); }
+  const iv = WM.toIntervals(r), G = (o) => WM.groupedProfile(r, iv, o).groups;
+  const ref = WM.calendarProfiles(r, iv).weekday;
+  G({ x: 'weekday', y: 'mean', unit: 'day' }).forEach((g, i) => assert.ok(Math.abs(g.value - ref[i].avg) < 1e-6 && g.n === ref[i].n));
+  assert.ok(G({ x: 'weekday', y: 'max', unit: 'day' })[5].value >= G({ x: 'weekday', y: 'mean', unit: 'day' })[5].value);
+  assert.ok(G({ x: 'weekday', y: 'flow', unit: 'day' }).every((g, i) => g.n > 10 && g.value < (i === 5 ? 11 : 2)), 'débit minimal de nuit : 0,5 L/h (10,5 le samedi)');
+  const hour = G({ x: 'hour', y: 'mean', unit: 'slot' });
+  assert.equal(hour.length, 12);
+  assert.ok(hour[1].value < 6 && hour[0].value > 15, 'tranche 2 h-4 h presque vide');
+  const sat = G({ x: 'weekday', y: 'mean', unit: 'slot' });     // volume moyen d'une tranche de 2 h selon le jour : samedi plus fort
+  assert.ok(sat[5].value > sat[0].value * 1.9);
+  assert.equal(G({ x: 'dom', y: 'mean', unit: 'day' }).length, 31);
+  const mo = G({ x: 'month', y: 'mean', unit: 'month' });
+  assert.ok(mo[5].n === 1 && mo[8].n === 0 && mo[8].value === null);
+  const wk = G({ x: 'month', y: 'mean', unit: 'week' });
+  assert.ok(wk[5].n >= 3 && wk[6].n >= 3, 'semaines complètes rangées par mois de leur début');
+  const perDay = G({ x: 'month', y: 'mean', unit: 'day' });
+  assert.ok(Math.abs(perDay[5].value - perDay[6].value) < 40, 'par jour : juin et juillet comparables');
+});

@@ -523,6 +523,92 @@
     return sums.map((r, i) => r.map((s, j) => (cnt[i][j] ? s / cnt[i][j] : 0)));
   }
 
+  /**
+   * Profils moyens sur le calendrier : consommation moyenne par jour de la semaine (lundi = 0), par jour du mois (1 à 31) et par mois de l'année
+   * (total du mois, moyenne des années disponibles). Seuls les jours COMPLETS sont comptés (relevés avant et après, jamais estimés
+   * à partir de relevés manuels espacés de plus de 6 h) ; un mois n'est compté que si tous ses jours le sont.
+   */
+  function calendarProfiles(readings, intervals) {
+    const out = { weekday: Array.from({ length: 7 }, () => ({ n: 0, avg: 0 })), dom: Array.from({ length: 31 }, () => ({ n: 0, avg: 0 })), month: Array.from({ length: 12 }, () => ({ n: 0, avg: 0 })), days: 0 };
+    if (readings.length < 2) return out;
+    const first = readings[0].t, last = readings[readings.length - 1].t;
+    const edges = [];
+    for (let e = startOfDay(first); e <= last + DAY; e = addDays(e, 1)) edges.push(e);
+    const first0 = edges.findIndex((e) => e >= first - 3 * H);                // premier jour entamé après le premier relevé
+    const vols = bucketize(intervals, edges), bad = new Array(vols.length).fill(false);
+    for (const iv of intervals) {
+      if (iv.t1 - iv.t0 <= 6 * H && !iv.reset) continue;
+      for (let i = 0; i < edges.length - 1; i++) if (edges[i + 1] > iv.t0 && edges[i] < iv.t1) bad[i] = true;
+    }
+    const days = [];
+    for (let i = Math.max(0, first0); i < vols.length; i++) if (edges[i + 1] <= last + 3 * H && !bad[i]) days.push({ a: edges[i], v: vols[i], ok: true });
+    const add = (arr, k, v) => { arr[k].avg += v; arr[k].n++; };
+    for (const d of days) { const dt = new Date(d.a); add(out.weekday, (dt.getDay() + 6) % 7, d.v); add(out.dom, dt.getDate() - 1, d.v); }
+    out.days = days.length;
+    const months = new Map();
+    for (const d of days) { const dt = new Date(d.a), k = dt.getFullYear() * 12 + dt.getMonth(); const m = months.get(k) || { v: 0, n: 0 }; m.v += d.v; m.n++; months.set(k, m); }
+    for (const [k, m] of months) { const y = Math.floor(k / 12), mo = k % 12; if (m.n === new Date(y, mo + 1, 0).getDate()) add(out.month, mo, m.v); }
+    for (const arr of [out.weekday, out.dom, out.month]) for (const x of arr) if (x.n) x.avg /= x.n;
+    return out;
+  }
+
+  /**
+   * Profil à la demande. opts :
+   *   x    : 'hour' (heure du jour) | 'weekday' | 'dom' (jour du mois) | 'month' (mois de l'année) — ce qu'on met en abscisse ;
+   *   unit : 'slot' (tranche de 2 h) | 'day' | 'week' | 'month' — le regroupement : taille de chaque période mesurée ;
+   *   y    : 'mean' (volume moyen d'une période) | 'max' (volume de la période la plus forte) | 'flow' (débit minimal en L/h, le « débit de fond » d'une fuite) ;
+   *   offsetMin : décalage des tranches de 2 h (voir heatOffset).
+   * Seules les périodes COMPLÈTES et mesurées (jamais estimées à partir de relevés manuels espacés de plus de 6 h) comptent. Chaque période est
+   * rangée dans le groupe de son début. Combinaisons possibles : x=hour → slot ; weekday, dom → slot ou day ; month → toutes (week : début de semaine).
+   * Retourne { groups: [{ n, value }] } (value = null si aucune période).
+   */
+  function groupedProfile(readings, intervals, opts) {
+    const { x, y, unit } = opts, off = (opts.offsetMin || 0);
+    const groups = Array.from({ length: { hour: 12, weekday: 7, dom: 31, month: 12 }[x] }, () => ({ n: 0, value: null, vals: [] }));
+    if (readings.length < 2) return { groups };
+    const last = readings[readings.length - 1].t, first = readings[0].t;
+    // périodes : [début, fin[
+    const spans = [];
+    if (unit === 'slot') {
+      for (let i = 120; i >= 0; i--) { const d0 = addDays(startOfDay(last), -i); for (let k = 0; k < 12; k++) spans.push([d0 + (off + 120 * k) * 60e3, d0 + (off + 120 * k + 120) * 60e3]); }
+    } else {
+      const days = [];
+      for (let e = startOfDay(first); e <= last + DAY; e = addDays(e, 1)) days.push(e);
+      if (unit === 'day') for (let i = 0; i < days.length - 1; i++) spans.push([days[i], days[i + 1]]);
+      else if (unit === 'week') for (let i = 0; i + 7 < days.length; i++) { if (new Date(days[i]).getDay() === 1) spans.push([days[i], days[i + 7]]); }
+      else { let m0 = startOfMonth(first); if (m0 < first - 3 * H) m0 = addMonths(m0, 1); for (; addMonths(m0, 1) <= last + 3 * H; m0 = addMonths(m0, 1)) spans.push([m0, addMonths(m0, 1)]); }
+    }
+    const big = intervals.filter((iv) => iv.reset || iv.t1 - iv.t0 > 6 * H);
+    const flows = y === 'flow' ? intervals.filter((iv) => !iv.reset && iv.t1 - iv.t0 >= MIN_FLOW_SPAN) : [];
+    let j = 0;
+    for (const [a, b] of spans) {
+      if (a < first - 3 * H || b > last + 3 * H) continue;                                      // pas entièrement couverte
+      if (unit !== 'slot' && b > last + 3 * H) continue;
+      if (big.some((iv) => iv.t1 > a && iv.t0 < b)) continue;                                  // estimée : ignorée
+      let v;
+      if (y === 'flow') {
+        while (j < flows.length && flows[j].t1 <= a) j++;
+        const f = []; for (let q = j; q < flows.length && flows[q].t1 <= b; q++) f.push(flows[q].d / ((flows[q].t1 - flows[q].t0) / H));
+        if (f.length < (unit === 'slot' ? 1 : 8)) continue;
+        v = Math.min(...f);
+      } else v = total(intervals, a, b);
+      const d = new Date(a);
+      let k;
+      if (x === 'hour') k = Math.floor(((a - startOfDay(a)) / 60e3 - off + 1440) % 1440 / 120);
+      else if (x === 'weekday') k = (d.getDay() + 6) % 7;
+      else if (x === 'dom') k = d.getDate() - 1;
+      else k = d.getMonth();
+      if (!(k >= 0 && k < groups.length)) continue;
+      groups[k].vals.push(v);
+    }
+    for (const g of groups) {
+      g.n = g.vals.length;
+      if (g.n) g.value = y === 'max' ? Math.max(...g.vals) : y === 'flow' ? g.vals.reduce((p, q) => p + q, 0) / g.n : g.vals.reduce((p, q) => p + q, 0) / g.n;
+      delete g.vals;
+    }
+    return { groups };
+  }
+
   /* ---------- Formats (fr-FR) ---------- */
 
   const nf = (digits) => new Intl.NumberFormat('fr-FR', { maximumFractionDigits: digits, minimumFractionDigits: 0 });
@@ -579,7 +665,7 @@
     DEFAULT_CFG, mergeCfg, evaluateMeter, adaptiveAssess, peopleAt, dayKey,
     H, DAY, toReadings, toIntervals, bucketize, estimatedShare, total,
     startOfDay, addDays, startOfMonth, addMonths, startOfYear, addYears, startOfWeek,
-    edgesBack, edgesHours, edgesCalendar, edgesRolling, nextExpected, trendVsUsual, summarize, evaluateAlerts, weeklyProfile, heatOffset, median,
+    edgesBack, edgesHours, edgesCalendar, edgesRolling, nextExpected, trendVsUsual, summarize, evaluateAlerts, weeklyProfile, heatOffset, calendarProfiles, groupedProfile, median,
     fmtVolume, fmtDuration, fmtTime, pct,
   };
 });

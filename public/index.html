@@ -122,6 +122,22 @@
     <div id="heat" class="heat" role="img" aria-label="Profil horaire moyen par jour de la semaine"></div>
     <div class="scale" id="heat-scale"></div>
   </section>
+
+  <section class="panel" aria-labelledby="h-cal">
+    <div class="panel-head">
+      <div>
+        <h2 id="h-cal">Quand consomme-t-on le plus ?</h2>
+        <div class="small muted" id="cal-hint"></div>
+      </div>
+    </div>
+    <div class="cal-ctl">
+      <label>En abscisse (X) <select id="cal-x"><option value="weekday">Jour de la semaine</option><option value="hour">Heure du jour</option><option value="dom">Jour du mois</option><option value="month">Mois de l'année</option></select></label>
+      <label>Regroupement <select id="cal-unit"></select></label>
+      <label>En ordonnée (Y) <select id="cal-y"></select></label>
+    </div>
+    <p id="cal-note" class="small cal-note" aria-live="polite"></p>
+    <div class="chartwrap"><canvas id="cal-chart" role="img" aria-label="Consommation moyenne selon le jour de la semaine"></canvas></div>
+  </section>
   </div>
 
   <p class="small muted">Les consommations sont calculées à partir des index relevés toutes les 2 h, avec interpolation aux changements de jour, de mois et d'année (heure locale du navigateur).</p>
