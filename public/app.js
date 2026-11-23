@@ -377,7 +377,7 @@
       ? `Une case colorée entre ${qa.quietFromH} h et ${qa.quietToH} h est suspecte : ce compteur ne consomme normalement pas à cette heure.`
       : qa.baseFlowRatio > 0 ? 'Une fuite se voit en cases colorées la nuit, quand plus personne ne consomme.'
         : 'Une case colorée à une heure où le compteur ne consomme normalement pas est suspecte.';
-    $('#heat-hint').textContent = `Litres par tranche de 2 h, moyenne sur les 4 dernières semaines. ${hint} La case entourée (dernière mesure) est rouge si elle consomme plus que d'habitude, verte si moins, blanche si c'est pareil.`;  // complété plus bas si les tranches sont décalées
+    $('#heat-hint').textContent = `Litres par tranche de 2 h, moyenne sur les 4 dernières semaines. ${hint} Le texte de la case entourée (dernière mesure) passe du vert (−100 %) au blanc (comme d'habitude) puis au rouge (+200 % et au-delà) selon l'écart avec d'habitude.`;  // complété plus bas si les tranches sont décalées
     const off = WM.heatOffset(d.readings);                        // tranches décalées comme les relevés (ex. 16 h 30 – 18 h 30)
     const hh = (min) => `${Math.floor(min / 60) % 24}h${min % 60 ? String(min % 60).padStart(2, '0') : ''}`;
     if (off) $('#heat-hint').textContent += ` Les tranches sont décalées de ${off % 60 ? off + ' min' : off / 60 + ' h'} pour coïncider avec les relevés (par exemple ${hh(16 * 60 + off)} – ${hh(18 * 60 + off)}).`;
@@ -395,20 +395,20 @@
     const tag = !tr || tr.level === 'unknown' ? ['●', 'ici']
       : tr.level === 'up' ? ['▲', `+${Math.round(tr.pct)} %`] : tr.level === 'down' ? ['▼', `−${Math.abs(Math.round(tr.pct))} %`]
         : tr.level === 'unusual' ? ['!', 'inhabituel'] : ['=', 'habituel'];
+    // couleur du texte de la case repérée : dégradé vert (−100 %) → blanc (habituel) → rouge cramoisi (+200 % et au-delà)
+    const mix = (c1, c2, k) => '#' + c1.map((v, i) => Math.round(v + (c2[i] - v) * k).toString(16).padStart(2, '0')).join('');
+    const GREEN = [34, 197, 94], WHITE = [255, 255, 255], CRIMSON = [220, 20, 60];
+    const tagColor = !tr || tr.level === 'unknown' ? '#ffffff' : tr.pct == null ? (tr.level === 'unusual' ? '#dc143c' : '#ffffff')
+      : tr.pct < 0 ? mix(GREEN, WHITE, 1 - Math.min(1, -tr.pct / 100)) : mix(WHITE, CRIMSON, Math.min(1, tr.pct / 200));
     let html = '<div></div>' + Array.from({ length: 12 }, (_, i) => `<div class="h">${i % 2 === 0 ? hh(i * 120 + off) : ''}</div>`).join('');
     prof.forEach((row, r) => {
       html += `<div class="d">${days[r]}</div>`;
       row.forEach((val, c) => {
         const isNow = r === nowRow && c === nowCol;
         const pct = val <= 0 ? 0 : 10 + 90 * (val / max);
-        let bg = val <= 0 ? 'color-mix(in srgb, var(--text-muted) 10%, var(--surface-1))' : `color-mix(in srgb, ${colorVar(m)} ${pct.toFixed(0)}%, var(--surface-1))`;
-        // la case de la dernière mesure change de couleur selon la comparaison avec d'habitude : rouge = plus, vert = moins, blanc = pareil
-        if (isNow && tr && tr.level !== 'unknown') {
-          const k = tr.level === 'same' ? 0 : tr.level === 'unusual' ? 60 : Math.min(70, 25 + Math.abs(tr.pct) / 2);
-          bg = tr.level === 'same' ? 'var(--surface-1)' : `color-mix(in srgb, var(${tr.level === 'down' ? '--green' : '--red'}) ${k.toFixed(0)}%, var(--surface-1))`;
-        }
+        const bg = val <= 0 ? 'color-mix(in srgb, var(--text-muted) 10%, var(--surface-1))' : `color-mix(in srgb, ${colorVar(m)} ${pct.toFixed(0)}%, var(--surface-1))`;
         const lbl = `${days[r]} ${slot(c)} : ${vol(val)} en moyenne${isNow ? ' — dernière tranche mesurée' : ''}`;
-        html += `<div class="c${isNow ? ' now' : ''}" data-tip="${esc(lbl)}" style="background:${bg}" role="presentation">${isNow ? `<span class="nt"><b>${tag[0]}</b><span class="t"> ${esc(tag[1])}</span></span>` : ''}</div>`;
+        html += `<div class="c${isNow ? ' now' : ''}" data-tip="${esc(lbl)}" style="background:${bg}" role="presentation">${isNow ? `<span class="nt" style="color:${tagColor}"><b>${tag[0]}</b><span class="t"> ${esc(tag[1])}</span></span>` : ''}</div>`;
       });
     });
     el.innerHTML = html;
@@ -440,7 +440,7 @@
       <ul>
         <li><strong>Synthèse</strong> : les alertes en cours, puis pour chaque compteur la consommation d'aujourd'hui, d'hier, de la semaine, du mois et de l'année. « Calendaire » compte depuis le début du jour, de la semaine (lundi), du mois, de l'année ; « Glissant » compte les dernières 24 h, 7 jours, 30 jours, 12 mois.</li>
         <li><strong>Graphiques</strong> : la consommation par heure, jour, semaine, mois ou année, et l'index du compteur. Le signe « ≈ » ou une teinte plus claire signale une période seulement estimée, faute de relevés assez rapprochés.</li>
-        <li><strong>Profil horaire</strong> : la consommation moyenne de chaque tranche de 2 h, par jour de semaine (4 dernières semaines). La case entourée est celle de la <strong>dernière mesure</strong> ; elle devient rouge si la consommation est plus forte que d'habitude (▲), verte si elle est plus faible (▼), et reste blanche si c'est pareil (=). Selon le compteur : pour l'eau potable une fuite se voit en cases colorées la nuit ; pour l'arrosage (qui ne coule que la nuit) c'est une case colorée en journée qui est suspecte.</li>
+        <li><strong>Profil horaire</strong> : la consommation moyenne de chaque tranche de 2 h, par jour de semaine (4 dernières semaines). La case entourée est celle de la <strong>dernière mesure</strong> ; son texte passe du vert (consommation plus faible que d'habitude, ▼) au blanc (pareil, =) puis au rouge cramoisi (plus forte, ▲, saturé à +200 %). Selon le compteur : pour l'eau potable une fuite se voit en cases colorées la nuit ; pour l'arrosage (qui ne coule que la nuit) c'est une case colorée en journée qui est suspecte.</li>
       </ul>
       <h3>D'où viennent les chiffres</h3>
       <p>Le compteur envoie son index toutes les 2 heures environ ; la consommation d'une période est calculée à partir de ces index, répartis au prorata du temps. Le prochain relevé attendu est indiqué en haut de page. Le bouton ↻ recharge les données.</p>

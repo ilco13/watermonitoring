@@ -222,7 +222,7 @@ code { background: var(--bg); border-radius: 4px; padding: .05rem .3rem; font-si
 .heat-trend { margin: 0 0 .6rem; font-size: .92rem; }
 .heat .c { position: relative; display: grid; place-items: center; }
 .heat .c.now { outline: 3px solid var(--text-primary); outline-offset: 1px; z-index: 1; }
-.nt { background: var(--surface-1); color: var(--text-primary); border-radius: 4px; padding: 0 .3rem; font-size: .72rem; font-weight: 700; white-space: nowrap; box-shadow: 0 0 0 1px var(--border); line-height: 1.5; }
+.nt { background: #12171e; color: #fff; border-radius: 4px; padding: 0 .3rem; font-size: .72rem; font-weight: 700; white-space: nowrap; box-shadow: 0 0 0 1px #3b4757; line-height: 1.5; }
 .trend-pill { display: inline-block; background: var(--blue-bg); color: var(--blue); border-radius: 99px; padding: .05rem .55rem; font-weight: 700; white-space: nowrap; }
 .trend-pill.warn { background: var(--amber-bg); color: var(--amber); }
 @media (max-width: 700px) {
