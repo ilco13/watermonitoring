@@ -487,6 +487,8 @@
       </ul>
       <h3>D'où viennent les chiffres</h3>
       <p>Le compteur envoie son index toutes les 2 heures environ ; la consommation d'une période est calculée à partir de ces index, répartis au prorata du temps. Le prochain relevé attendu est indiqué en haut de page. Le bouton ↻ recharge les données.</p>
+      <h3>Colombine</h3>
+      <p>La bulle en bas à droite ouvre Colombine, l'assistante de l'ASL. Elle répond aux questions sur l'eau (consommation, alertes, jour le plus fort, comment fonctionnent les seuils) et sur l'ASL, comme sur le site de l'ASL. Elle ne peut rien modifier ici.</p>
       <h3>Les alertes</h3>
       <ul>
         <li><span class="pill critical"><i>×</i>Critique</span> : plus de relevé depuis longtemps, consommation du jour au-dessus du seuil, très gros débit.</li>

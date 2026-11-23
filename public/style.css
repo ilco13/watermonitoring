@@ -342,3 +342,21 @@ details.adv > summary { cursor: pointer; font-weight: 600; color: var(--blue); m
 .cal-ctl { display: flex; flex-wrap: wrap; gap: .6rem 1rem; margin: 0 0 .6rem; }
 .cal-ctl label { display: grid; gap: .2rem; font-size: .8rem; color: var(--text-secondary); }
 .cal-ctl select { width: auto; min-height: 2.2rem; padding: .3rem .5rem; }
+
+/* Colombine */
+.colombine-btn { position: fixed; right: 1rem; bottom: 1rem; z-index: 50; width: 56px; height: 56px; padding: 0; border: 0; border-radius: 50%; background: none; cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,.3); transition: transform .15s; }
+.colombine-btn:hover { transform: scale(1.07); }
+.colombine-btn svg { display: block; border-radius: 50%; }
+.colombine { position: fixed; right: 1rem; bottom: 5.2rem; z-index: 50; width: min(24rem, calc(100vw - 2rem)); height: min(34rem, calc(100vh - 7rem)); display: flex; flex-direction: column; background: var(--surface-1); color: var(--text-primary); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 12px 36px rgba(0,0,0,.35); overflow: hidden; }
+.colombine[hidden] { display: none; }
+.colombine header { display: flex; align-items: center; gap: .5rem; padding: .55rem .8rem; background: #1f4e79; color: #fff; }
+.colombine header strong { flex: 1; }
+.colombine header .link { background: none; border: 0; color: #fff; font-size: .85rem; text-decoration: underline; cursor: pointer; }
+.colombine-log { flex: 1; overflow-y: auto; padding: .8rem; display: flex; flex-direction: column; gap: .5rem; background: var(--bg); }
+.colombine-msg { max-width: 88%; padding: .5rem .7rem; border-radius: 12px; white-space: pre-line; overflow-wrap: anywhere; font-size: .93rem; }
+.colombine-msg.her { align-self: flex-start; background: var(--surface-1); border: 1px solid var(--border); }
+.colombine-msg.me { align-self: flex-end; background: #1f4e79; color: #fff; }
+.colombine-msg.wait { color: var(--text-muted); font-style: italic; }
+.colombine form { display: flex; gap: .5rem; align-items: flex-end; padding: .6rem; border-top: 1px solid var(--border); }
+.colombine textarea { flex: 1; font: inherit; resize: none; min-height: 2.6rem; padding: .4rem .55rem; border: 1px solid var(--field-border); border-radius: 7px; background: var(--surface-1); color: inherit; }
+@media print { .colombine-btn, .colombine { display: none; } }

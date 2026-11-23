@@ -234,3 +234,36 @@ export async function sendTestMail(env, by, now = Date.now()) {
     `Site : ${(env.SITE_URL || '').replace(/\/$/, '')}/#synthese`].join('\n');
   return sendToAsl(env, '[Eau] Mail de test', body);
 }
+
+/**
+ * Chiffres du suivi de l'eau pour Colombine (assistante de l'ASL) : texte court, calculé comme sur la page (heure de Paris).
+ * Aucune donnée personnelle : seulement des volumes, des alertes et les réglages du lotissement.
+ */
+export async function summaryText(env, now = Date.now()) {
+  const { cfg, byVar } = await loadAlertInputs(env, now);
+  const sn = toParis(now);
+  const fmtDay = (ms) => new Date(toParis(ms)).toLocaleString('fr-FR', { timeZone: 'UTC', weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
+  const P = WM.peopleAt(cfg.site, sn);
+  const lines = [`Situation du lotissement : ${P} maison${P > 1 ? 's' : ''} habitée${P > 1 ? 's' : ''}, ${cfg.site.works || 0} en travaux (14 lots à terme). Heure : ${fmtDay(now)}.`];
+  for (const e of cfg.site.events || []) lines.push(`Événement annoncé : ${e.label} du ${e.from} au ${e.to}.`);
+  for (const m of cfg.meters) {
+    const rows = (byVar[m.variable] || []).map((r) => ({ time: toParis(r.ts), value: r.value }));
+    const readings = WM.toReadings(rows, m.litresPerUnit), intervals = WM.toIntervals(readings);
+    lines.push('', `Compteur « ${m.name} » :`);
+    if (!readings.length) { lines.push('  aucun relevé.'); continue; }
+    const sum = WM.summarize(readings, intervals, sn);
+    const v = (x) => WM.fmtVolume(x);
+    lines.push(`  dernier relevé : ${fmtDay(readings[readings.length - 1].t - parisOffset(readings[readings.length - 1].t))} ; index ${(sum.indexL / 1000).toFixed(3).replace('.', ',')} m³.`);
+    lines.push(`  consommation : aujourd'hui ${v(sum.today)}, hier ${v(sum.yesterday)}, cette semaine ${v(sum.week)}, ce mois ${v(sum.month)}, 24 dernières heures ${v(sum.roll24)}, 7 derniers jours ${v(sum.roll7)}, 30 derniers jours ${v(sum.roll30)} ; moyenne des 7 jours précédents ${v(sum.avg7)} par jour.`);
+    const alerts = WM.evaluateMeter(m, cfg.site, readings, intervals, sn);
+    lines.push(alerts.length ? '  alertes en cours : ' + alerts.map((a) => `[${LEVEL_LABEL[a.level] || a.level}] ${a.text}`).join(' | ') : '  aucune alerte en cours.');
+    if (m.adaptive) {
+      const a = WM.adaptiveAssess(m, cfg.site, readings, intervals, sn);
+      lines.push(a.ready ? `  niveau normal appris (${a.people} maisons habitées) : environ ${v(a.ref.v)} par jour, débit de fond ≈ ${Math.round(a.ref.f)} L/h ; alerte au-delà de ${v(a.vMax)} par jour ou si l'eau ne descend jamais sous ${Math.round(a.fMax)} L/h pendant 24 h.` : `  seuils automatiques : apprentissage en cours (${a.learned} jours sur 7).`);
+    }
+    const prof = WM.calendarProfiles(readings, intervals), days = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche'];
+    const best = prof.weekday.reduce((bi, x, i) => (x.n && (bi < 0 || x.avg > prof.weekday[bi].avg) ? i : bi), -1);
+    if (best >= 0) lines.push(`  jour de la semaine où l'on consomme le plus (sur ${prof.days} jours mesurés) : ${days[best]}, ${v(prof.weekday[best].avg)} par jour en moyenne.`);
+  }
+  return lines.join('\n');
+}

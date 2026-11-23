@@ -23,7 +23,7 @@
  */
 import { parseIngest } from './ingest.js';
 import '../public/lib.js'; // calculs communs avec le navigateur : script UMD qui, dans un Worker, se range dans self.WM
-import { alertStatus, bindLib, previewAlerts, runAlertCheck, sendTestMail, setMailEnabled } from './alerting.js';
+import { alertStatus, bindLib, previewAlerts, runAlertCheck, sendTestMail, setMailEnabled, summaryText } from './alerting.js';
 
 import { SESSION_COOKIE, clearSessionCookie, getCookie, makeSession, safeNext, sessionCookie, sign, verify } from './auth.js';
 import ASSETS from './assets.js'; // généré depuis public/ par scripts/build-assets.mjs
@@ -352,6 +352,22 @@ async function handleApi(request, url, env, session) {
       return json({ status: true, result: await runAlertCheck(env) });
     }
   }
+  if (p === '/api/colombine' && request.method === 'POST') {
+    // Colombine (assistante de l'ASL) répond aux questions sur l'eau : on lui envoie la question et les chiffres, par jeton signé
+    if (!writeAllowed(request, url)) return json({ status: false, message: 'Requête refusée' }, 403);
+    let b; try { b = await request.json(); } catch { return json({ status: false, message: 'JSON invalide' }, 400); }
+    const q = String((b && b.q) || '').slice(0, 2000);
+    if (!q.trim()) return json({ status: true, result: { answer: "Je n'ai rien reçu." } });
+    const history = (Array.isArray(b.history) ? b.history : []).slice(-6).filter((h) => h && (h.role === 'user' || h.role === 'assistant') && typeof h.content === 'string').map((h) => ({ role: h.role, content: h.content.slice(0, 600) }));
+    try {
+      const token = await sign({ v: 1, aud: 'eau-colombine', nonce: crypto.randomUUID(), exp: Date.now() + 120e3, sub: String(session.sub), q, history, eau: await summaryText(env) }, env.SSO_SECRET);
+      const url2 = `${env.ASL_URL.replace(/\/$/, '')}/api/eau-colombine`;
+      const init = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }) };
+      const res = env.ASL ? await env.ASL.fetch(new Request(url2, init)) : await fetch(url2, init);
+      const j = await res.json().catch(() => null);
+      return json({ status: true, result: { answer: (j && j.answer) || "Colombine n'a pas pu répondre. Réessayez.", failed: !res.ok || !j || j.ok === false || !!(j && j.failed) } });
+    } catch (e) { return json({ status: true, result: { answer: "Colombine n'a pas pu répondre. Réessayez dans un instant.", failed: true } }); }
+  }
   if (p === '/api/ingest-key') {
     if (!admin) return FORBIDDEN();
     if (request.method === 'POST') {
@@ -481,6 +497,12 @@ export default {
     }
     if (url.pathname === '/sso/callback') return handleSsoCallback(request, url, env);
 
+    // chiffres de l'eau pour Colombine (appel de l'ASL, jeton signé de 60 s) : jamais ouvert à un navigateur
+    if (url.pathname === '/internal/summary') {
+      const tok = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
+      if (!env.SSO_SECRET || !(await verify(tok, env.SSO_SECRET, 'eau-summary'))) return new Response('Refusé', { status: 401 });
+      return new Response(await summaryText(env), { headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' } });
+    }
     // l'icône est publique : elle doit s'afficher dans l'onglet même avant la connexion
     if (url.pathname === '/icone.png') return serveAsset(request, url, env);
     if (url.pathname === '/favicon.ico') return serveAsset(request, new URL('/icone.png', url), env);   // les navigateurs la demandent d'office

@@ -143,6 +143,12 @@
   <p class="small muted">Les consommations sont calculées à partir des index relevés toutes les 2 h, avec interpolation aux changements de jour, de mois et d'année (heure locale du navigateur).</p>
 </main>
 
+<button type="button" id="colombine-btn" class="colombine-btn" aria-expanded="false" aria-controls="colombine" title="Poser une question à Colombine" aria-label="Poser une question à Colombine"><svg viewBox="0 0 64 64" width="56" height="56" aria-hidden="true" focusable="false"><circle cx="32" cy="32" r="32" fill="#1f4e79"/><path d="M12 34c-3-16 7-27 20-27s23 11 20 27c-2-9-7-14-20-14s-18 5-20 14z" fill="#5b3a29"/><circle cx="32" cy="35" r="17" fill="#fbe3cf"/><path d="M15 31c2-9 9-13 17-13s15 4 17 13c-5-4-10-6-17-6s-12 2-17 6z" fill="#5b3a29"/><circle cx="25.5" cy="35" r="2.4" fill="#2b2b2b"/><circle cx="38.5" cy="35" r="2.4" fill="#2b2b2b"/><circle cx="26.3" cy="34.2" r=".8" fill="#fff"/><circle cx="39.3" cy="34.2" r=".8" fill="#fff"/><circle cx="21.5" cy="41" r="3" fill="#f4a6a0" opacity=".7"/><circle cx="42.5" cy="41" r="3" fill="#f4a6a0" opacity=".7"/><path d="M26 42.5c3.5 4 8.5 4 12 0" fill="none" stroke="#b3443c" stroke-width="2" stroke-linecap="round"/><circle cx="47" cy="17" r="5.5" fill="#f2c94c"/><circle cx="47" cy="17" r="2" fill="#fff"/></svg></button>
+<section id="colombine" class="colombine" hidden aria-label="Discussion avec Colombine">
+  <header><strong>Colombine</strong><button type="button" id="colombine-new" class="link">Effacer</button><button type="button" id="colombine-close" class="link" aria-label="Fermer la discussion">Fermer</button></header>
+  <div id="colombine-log" class="colombine-log" aria-live="polite"></div>
+  <form id="colombine-form"><textarea id="colombine-q" rows="2" maxlength="2000" placeholder="Une question sur l'eau ou sur l'ASL…" aria-label="Votre question"></textarea><button class="btn primary" type="submit">Envoyer</button></form>
+</section>
 <div id="tip" role="tooltip"></div>
 <dialog id="settings"></dialog>
 <dialog id="help"></dialog>
@@ -152,5 +158,6 @@
 <script src="lib.js"></script>
 <script src="demo.js"></script>
 <script src="app.js"></script>
+<script src="colombine.js"></script>
 </body>
 </html>
