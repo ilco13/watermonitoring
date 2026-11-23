@@ -415,17 +415,16 @@
     $('#heat-scale').innerHTML = `0 <span class="bar" style="background:linear-gradient(90deg,color-mix(in srgb,var(--text-muted) 10%,var(--surface-1)),color-mix(in srgb,${colorVar(m)} 10%,var(--surface-1)),${colorVar(m)})"></span> ${vol(max)} par tranche de 2 h`;
 
     // texte de tendance : dernière tranche mesurée comparée à la même tranche, le même jour de la semaine, les semaines précédentes
-    let txt = `<strong>Dernière mesure</strong> : ${dayNames[nowRow]}, ${slot(nowCol).replace('–', ' – ')} (case entourée). `;
-    if (!tr) txt += 'Pas encore assez de relevés récents pour comparer.';
+    let txt;
+    if (!tr) txt = 'Pas encore assez de relevés récents pour comparer.';
     else {
-      const win = `${fmtHm(tr.t0)} → ${fmtHm(tr.t1)}`, dn = dayNames[(new Date(tr.t1).getDay() + 6) % 7];
-      const base = `Dernière tranche mesurée (${win}) : <strong>${vol(tr.value)}</strong>`;
-      const usual = tr.usual == null ? '' : `${vol(tr.usual)} en moyenne ces ${tr.weeks} derniers ${dn}s à la même heure`;
-      txt += tr.level === 'unknown' ? `${base}. Pas assez de semaines comparables pour dire si c'est habituel (il en faut au moins 2).`
-        : tr.level === 'up' ? `${base}, soit <span class="trend-pill">▲ ${fmtDelta(tr.pct).replace('▲ ', '')}</span> par rapport à d'habitude (${usual}).`
-          : tr.level === 'down' ? `${base}, soit <span class="trend-pill">▼ ${fmtDelta(tr.pct).replace('▼ ', '')}</span> par rapport à d'habitude (${usual}).`
-            : tr.level === 'unusual' ? `${base} alors que d'habitude presque rien à cette heure (${usual}) : <span class="trend-pill warn">! consommation inhabituelle</span>`
-              : `${base} : <span class="trend-pill">= comme d'habitude</span> (${usual}).`;
+      const head = `Dernière tranche horaire mesurée de <strong>${fmtHm(tr.t0)}</strong> à <strong>${fmtHm(tr.t1)}</strong> : <strong>${vol(tr.value)}</strong>`;
+      if (tr.usual == null) txt = `${head} (pas assez de semaines comparables pour dire si c'est habituel).`;
+      else {
+        const diff = tr.value - tr.usual, big = tr.level === 'same' || Math.abs(diff) < 0.5;
+        txt = big ? `${head}, comme d'habitude (${vol(tr.usual)}).`
+          : `${head}, soit <strong>${vol(Math.abs(diff))} de ${diff > 0 ? 'plus' : 'moins'}</strong>${tr.pct == null ? '' : ` (${fmtDelta(tr.pct)})`} par rapport à d'habitude (${vol(tr.usual)}).`;
+      }
     }
     $('#heat-trend').innerHTML = txt;
   }
